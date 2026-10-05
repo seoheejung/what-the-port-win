@@ -18,9 +18,12 @@ namespace WhatThePort {
         [DataMember] public string Terminal = "PowerShell";
         [DataMember] public bool Notifications = true;
         [DataMember] public bool AllListeners = false;
+        [DataMember] public string Language = "ko";
         [DataMember] public int? PanelLeft;
         [DataMember] public int? PanelBottom;
         public void Validate() {
+            if (String.IsNullOrEmpty(Language)) Language = "ko";
+            if (Language != "ko" && Language != "en") throw new ArgumentException("Invalid language.");
             if (ScanSeconds < 1 || ScanSeconds > 30 || Double.IsNaN(MemoryGB) || MemoryGB < .1 || MemoryGB > 1024 || GrowthMB < 0 || GrowthMB > 1048576 || CpuPercent < 1 || CpuPercent > 100 || Double.IsNaN(IdleHours) || IdleHours < .05 || IdleHours > 720) throw new ArgumentException("Check the sampling, alert and idle thresholds.");
             if (!new [] {"Off", "Ask", "Automatic"}.Contains(Cleanup)) throw new ArgumentException("Invalid cleanup mode.");
             if (!new [] {"PowerShell", "Windows Terminal"}.Contains(Terminal)) throw new ArgumentException("Invalid terminal.");

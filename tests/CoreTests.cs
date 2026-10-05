@@ -25,9 +25,14 @@ public static class CoreTests {
     static Server Idle(DateTime now){return new Server{Observed=now.AddHours(-5),LastActive=now.AddHours(-5),SampledAt=now,Memory=100*Format.MB};}
     static void Units(){
         var settings=new Settings();DateTime now=DateTime.UtcNow;
+        StopOutcomes(now);
+        Check("Korean is the default language",settings.Language=="ko");
+        var oldSettings=new Settings{Language=null};oldSettings.Validate();Check("legacy settings migrate to Korean",oldSettings.Language=="ko");
+        Throws("unsupported language rejected",()=>new Settings{Language="xx"}.Validate());
         Check("automatic cleanup defaults to Off",settings.Cleanup=="Off");
         foreach(var name in new[]{"postgres","redis-server.exe","mongod","mysqld","sqlservr","powershell","codex","claude","wtp"})Check("protected: "+name,Policy.IsProtectedName(name));
         Check("development runtime can be stopped",!Policy.IsProtectedName("node"));
+        foreach(var name in new[]{"wmux.exe","cagent.exe","docker.exe","dockerd","com.docker.backend.exe","boiler-ops-agent"})Check("infrastructure is protected: "+name,Policy.IsProtectedName(name));
         var all=new Dictionary<int,ProcessNode>{{1,new ProcessNode{Pid=1,Name="powershell"}},{2,new ProcessNode{Pid=2,Parent=1,Name="node"}},{3,new ProcessNode{Pid=3,Parent=2,Name="worker"}},{4,new ProcessNode{Pid=4,Parent=2,Name="python"}},{5,new ProcessNode{Pid=5,Parent=4,Name="worker"}},{6,new ProcessNode{Pid=6,Parent=2,Name="postgres"}}};
         var tree=Policy.Tree(2,all,new HashSet<int>{2,4});
         Check("tree excludes shell, separate listener and protected database",tree.Select(p=>p.Pid).SequenceEqual(new[]{2,3}));
@@ -55,6 +60,8 @@ public static class CoreTests {
         link.Session="x'; exit; '";Throws("session shell injection rejected",()=>link.Validate());link.Session="--help";Throws("session flag injection rejected",()=>link.Validate());link.Session="abc-123";
         Check("PowerShell apostrophe safely quoted",Launchers.QuotePowerShell("C:\\dev\\it's $(test)")=="'C:\\dev\\it''s $(test)'");
         var store=new Store(temp);store.SaveSettings(settings);Check("settings round-trip",store.LoadSettings().IdleHours==4&&store.LoadSettings().Notifications);
+        settings.Language="en";store.SaveSettings(settings);Check("English preference survives restart",new Store(temp).LoadSettings().Language=="en");
+        settings.Language="ko";store.SaveSettings(settings);Check("Korean preference survives restart",new Store(temp).LoadSettings().Language=="ko");
         settings.PanelLeft=-1500;settings.PanelBottom=920;store.SaveSettings(settings);var positioned=store.LoadSettings();Check("panel position persists across restart with negative monitor origin",positioned.PanelLeft==-1500&&positioned.PanelBottom==920);
         settings.PanelLeft=null;settings.PanelBottom=null;store.SaveSettings(settings);Check("panel position reset persists",!store.LoadSettings().PanelLeft.HasValue&&!store.LoadSettings().PanelBottom.HasValue);
         settings.Cleanup="Ask";store.SaveSettings(settings);Check("atomic settings replacement",store.LoadSettings().Cleanup=="Ask");
@@ -63,6 +70,19 @@ public static class CoreTests {
         store.SaveLink(link);Check("project link round-trip",store.LinkFor(new Server{Port=3000,Folder=temp}).Session=="abc-123");
         Check("port reuse cannot inherit another project session",store.LinkFor(new Server{Port=3000,Folder=temp+"-different"})==null);
         Check("unknown folder cannot inherit old session",store.LinkFor(new Server{Port=3000})==null);
+    }
+    static void StopOutcomes(DateTime now){
+        var server=new Server{Port=3000,SampledAt=now,Processes=new List<ProcessNode>{new ProcessNode{Pid=10,Name="node",Depth=0},new ProcessNode{Pid=11,Name="worker",Depth=1}}};
+        var called=new List<int>();
+        ProcessControl.StopNode partial=delegate(ProcessNode node,out string error){called.Add(node.Pid);error=node.Pid==11?"Access denied":null;return error==null;};
+        var result=ProcessControl.StopDetailed(server,partial);
+        Check("partial stop retains root success and child error",result.ListenerStopped&&result.Stopped==1&&result.Errors.Count==1&&result.Errors[0].Contains("worker (11)"));
+        called.Clear();result=ProcessControl.StopDetailed(server,delegate(ProcessNode node,out string error){called.Add(node.Pid);error="Denied";return false;});
+        Check("root failure never attempts descendants",!result.ListenerStopped&&result.Stopped==0&&called.SequenceEqual(new[]{10}));
+        server.Processes[1].Name="docker";called.Clear();result=ProcessControl.StopDetailed(server,partial);
+        Check("protected child is skipped with a recorded reason count",result.ListenerStopped&&result.Skipped==1&&result.Errors.Count==0&&called.SequenceEqual(new[]{10}));
+        server.Processes[0].Name="wmux";called.Clear();result=ProcessControl.StopDetailed(server,partial);
+        Check("protected root is refused even with incorrect server flag",!result.ListenerStopped&&result.Errors.Count==1&&called.Count==0);
     }
     static Process StartFixture(){
         var p=Process.Start(new ProcessStartInfo(System.Reflection.Assembly.GetExecutingAssembly().Location,"--fixture"){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,WorkingDirectory=temp});

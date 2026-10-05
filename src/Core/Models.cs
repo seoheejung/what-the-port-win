@@ -41,6 +41,7 @@ namespace WhatThePort {
         [DataMember] public double Cpu;
         [DataMember] public int Connections;
         [DataMember] public bool Protected;
+        [DataMember] public string ProtectionReason;
         [DataMember] public string Warning;
         [DataMember] public List<ProcessNode> Processes = new List<ProcessNode>();
         [DataMember] public List<Sample> History = new List<Sample>();
