@@ -13,6 +13,7 @@ namespace WhatThePort.App {
     public sealed class Chart : FrameworkElement {
         public List<Sample> Samples = new List<Sample>();
         public bool Cpu;
+        public string UiLanguage="en";
         bool spark;
         public bool Spark { get{return spark;} set{spark=value;Focusable=!value;KeyboardNavigation.SetIsTabStop(this,!value);} }
         public double Threshold;
@@ -29,11 +30,11 @@ namespace WhatThePort.App {
         public void SelectTime(DateTime time){if(Samples.Count>0)selected=Samples.IndexOf(Samples.OrderBy(s=>Math.Abs((s.At-time).TotalSeconds)).First());}
         string SampleText(Sample sample){return sample.At.ToLocalTime().ToString("HH:mm:ss")+" · "+(Cpu?Format.Percent(sample.Cpu):Format.Bytes(sample.Memory));}
         public string AccessibleDescription(){
-            string label=Cpu?"CPU":"Memory";
-            if(Samples.Count==0)return label+" chart. Collecting samples.";
+            var strings=new Strings(UiLanguage);string label=strings.T(Cpu?"CPU":"Memory");
+            if(Samples.Count==0)return strings.F("{0} chart. Collecting samples.",label);
             int index=selected<0?Samples.Count-1:Math.Min(selected,Samples.Count-1);
             string range=Cpu?Format.Percent(Samples.Min(s=>s.Cpu))+" to "+Format.Percent(Samples.Max(s=>s.Cpu)):Format.Bytes(Samples.Min(s=>s.Memory))+" to "+Format.Bytes(Samples.Max(s=>s.Memory));
-            return label+" chart, last 10 minutes. "+Samples.Count+" samples. Range "+range+". Sample "+(index+1)+" of "+Samples.Count+": "+SampleText(Samples[index])+".";
+            return strings.F("{0} chart, last 10 minutes. {1} samples. Range {2}. Sample {3} of {1}: {4}.",label,Samples.Count,range.Replace(" to ",strings.T(" to ")),index+1,SampleText(Samples[index]));
         }
         protected override AutomationPeer OnCreateAutomationPeer(){return Spark?null:new ChartPeer(this);}
         sealed class ChartPeer : FrameworkElementAutomationPeer {
@@ -42,7 +43,7 @@ namespace WhatThePort.App {
             protected override string GetClassNameCore(){return "ResourceChart";}
             protected override AutomationControlType GetAutomationControlTypeCore(){return AutomationControlType.Custom;}
             protected override string GetNameCore(){return chart.AccessibleDescription();}
-            protected override string GetHelpTextCore(){return "Left and Right: previous or next sample. Home and End: first or latest sample. Tab: next control.";}
+            protected override string GetHelpTextCore(){return new Strings(chart.UiLanguage).T("Left and Right: previous or next sample. Home and End: first or latest sample. Tab: next control.");}
         }
         protected override void OnKeyDown(KeyEventArgs e){
             base.OnKeyDown(e);if(Spark||Samples.Count==0)return;
@@ -85,8 +86,8 @@ namespace WhatThePort.App {
             if(IsKeyboardFocused&&!Spark&&selected>=0&&selected<Samples.Count){var point=points[selected];dc.DrawLine(new Pen(new SolidColorBrush(Stroke),1),new Point(point.X,top),new Point(point.X,bottom));Label(dc,SampleText(Samples[selected]),left+8,0,"#F5F5F7");}
             if(hover.HasValue)dc.DrawLine(gridPen,new Point(hover.Value,top),new Point(hover.Value,bottom));
         }
-        static void Label(DrawingContext dc,string value,double x,double y,string color) {
-            var text=new FormattedText(value,CultureInfo.InvariantCulture,FlowDirection.LeftToRight,new Typeface("Consolas"),9,(Brush)new BrushConverter().ConvertFromString(color),1.0);
+        void Label(DrawingContext dc,string value,double x,double y,string color) {
+            var text=new FormattedText(new Strings(UiLanguage).T(value),CultureInfo.InvariantCulture,FlowDirection.LeftToRight,new Typeface(UiLanguage=="ko"?"Malgun Gothic":"Consolas"),9,(Brush)new BrushConverter().ConvertFromString(color),1.0);
             dc.DrawText(text,new Point(Math.Max(0,x),Math.Max(0,y)));
         }
     }

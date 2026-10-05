@@ -17,7 +17,7 @@ public static class UiTests {
         var app=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};
         try{
             PlacementTests();
-            panel=new WhatThePort.App.Panel(true,true);window=panel.Window;window.Opacity=0;window.ShowActivated=false;window.Show();
+            panel=new WhatThePort.App.Panel(true,true,null,"en");window=panel.Window;window.Opacity=0;window.ShowActivated=false;window.Show();
             NativePlacementTests();
             var bounds=PanelPlacement.Calculate(PanelPlacement.WorkArea(window),new Size(440,594),null);
             window.Left=bounds.Left;window.Top=bounds.Top;window.Width=bounds.Width;window.Height=bounds.Height;
@@ -61,9 +61,42 @@ public static class UiTests {
             Click(ByName("Stop selected server process trees"));Check("empty state after final cleanup",Rows().Count()==0&&All(Body()).OfType<TextBlock>().Any(t=>t.Text=="A little breathing room."));
             var pin=(Button)window.FindName("Pin");Click(pin);Check("pin toggles",pin.Content.ToString()=="◆");
             Check("pin state has a meaningful accessible name",UIElementAutomationPeer.CreatePeerForElement(pin).GetName()=="Unpin panel");
+            LocalizationTests();
         }catch(Exception e){failed++;Console.WriteLine("FAIL UI exception: "+e);}
         finally{if(panel!=null)panel.Quit();else app.Shutdown();}
         Console.WriteLine("\n"+passed+" UI passed, "+failed+" failed");return failed==0?0:1;
+    }
+    static void LocalizationTests(){
+        var snapshot=WhatThePort.App.Demo.Create();snapshot.Servers[0].Name="Settings";snapshot.Servers[0].Protected=true;snapshot.Servers[0].ProtectionReason="This app or a parent process. Stopping it could close your working session.";
+        typeof(WhatThePort.App.Panel).GetField("current",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).SetValue(panel,snapshot);Rerender();
+        var regular=All(Body()).OfType<Grid>().First(g=>(g.Tag as string)=="row-"+snapshot.Servers[0].Key);
+        double[] x=regular.Children.OfType<FrameworkElement>().Where(e=>Grid.GetColumn(e)>0).Select(e=>e.TranslatePoint(new Point(),window).X).ToArray();
+        Click(ByName("Select servers to stop (C)"));
+        var cleanup=All(Body()).OfType<Grid>().First(g=>(g.Tag as string)=="row-"+snapshot.Servers[0].Key);
+        double[] y=cleanup.Children.OfType<FrameworkElement>().Where(e=>Grid.GetColumn(e)>0).Select(e=>e.TranslatePoint(new Point(),window).X).ToArray();
+        Check("list and cleanup columns retain identical positions",x.Length==y.Length&&x.Zip(y,(a,b)=>Near(a,b)).All(equal=>equal));
+        var protectedBox=All(Body()).OfType<CheckBox>().First();
+        Check("protected checkbox explains why without enabling stop",!protectedBox.IsEnabled&&ToolTipService.GetShowOnDisabled(protectedBox)&&AutomationProperties.GetHelpText(protectedBox).Contains("parent process"));
+        Press(Key.Escape);Click(ByName("Settings (Ctrl+,)"));
+        All(Body()).OfType<ComboBox>().Single(c=>(string)c.Tag=="select-LANGUAGE / 언어").SelectedItem="한국어";
+        Click(ByName("Save preferences"));
+        Check("language save immediately translates header and feedback",Title()=="서버"&&Message().Contains("설정"));
+        Check("project names are never translated",All(Body()).OfType<TextBlock>().Any(t=>t.Text=="Settings"));
+        Check("Korean accessibility names include header and settings",AutomationProperties.GetName((Button)window.FindName("Back"))=="서버 목록"&&ByName("설정 (Ctrl+,)")!=null);
+        Click(Rows().First());var chart=All(Body()).OfType<Chart>().First();
+        Check("Korean chart exposes samples and keyboard instructions",UIElementAutomationPeer.CreatePeerForElement(chart).GetName().Contains("측정값")&&UIElementAutomationPeer.CreatePeerForElement(chart).GetHelpText().Contains("방향키"));
+        Click(ByName("프로젝트 연결 관리 및 로컬 URL 복사"));Check("Korean project link labels",Title()=="프로젝트 연결"&&All(Body()).OfType<TextBox>().Any(t=>AutomationProperties.GetName(t)=="세션 ID"));
+        Press(Key.Escape);Click(ByName("종료할 서버 선택 (C)"));Check("Korean protected cleanup explanation is visible",All(Body()).OfType<TextBlock>().Any(t=>t.Text.Contains("보호된 항목")));
+        Press(Key.Escape);Click(ByName("설정 (Ctrl+,)"));
+        var sample=All(Body()).OfType<TextBox>().First();sample.Text="bad";Click(ByName("설정 저장"));Check("invalid numeric input has Korean feedback",Message().Contains("올바른 숫자"));sample.Text="3";
+        var modes=All(Body()).OfType<ComboBox>().Single(c=>(string)c.Tag=="select-AUTOMATIC CLEAN UP");Check("cleanup options are localized",modes.Items.Cast<string>().SequenceEqual(new[]{"끄기","알림 후 직접 선택","자동 종료"}));
+        All(Body()).OfType<ComboBox>().Single(c=>(string)c.Tag=="select-LANGUAGE / 언어").SelectedItem="English";
+        Click(ByName("설정 저장"));Check("English can be restored without restart",Title()=="Servers"&&ByName("Settings (Ctrl+,)")!=null);
+        var strings=new Strings("ko");var outcome=new WhatThePort.StopResult{Port=3000,ListenerStopped=true,Stopped=1};outcome.Errors.Add("Access denied");
+        Check("partial stop feedback cannot claim total failure or total success",strings.StopSummary(outcome).Contains("일부 종료")&&strings.StopSummary(outcome).Contains("서버 본체 종료")&&strings.StopSummary(outcome).Contains("오류 1건"));
+        foreach(var s in snapshot.Servers)s.Protected=true;Rerender();Click(ByName("Select servers to stop (C)"));
+        Check("all-protected list explains zero selectable servers",!ByName("Stop selected server process trees").IsEnabled&&All(Body()).OfType<TextBlock>().Any(t=>t.Text.Contains("There are no servers you can stop")));
+        Check("header focus controls stay compact",((Button)window.FindName("Pin")).ActualHeight==32);
     }
     static void NativePlacementTests(){
         PanelPlacement.Place(window,594,null,true,false);Layout();
