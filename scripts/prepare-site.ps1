@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$siteRoot = Join-Path $projectRoot 'site\dist'
+$siteRoot = Join-Path $projectRoot 'docs'
 foreach ($folder in @('assets\images','assets\fonts','downloads')) { New-Item -ItemType Directory -Force -Path (Join-Path $siteRoot $folder) | Out-Null }
 Copy-Item -Path (Join-Path $projectRoot 'docs\images\*.png') -Destination (Join-Path $siteRoot 'assets\images') -Force
 foreach ($font in @('Geist-Regular.ttf','Geist-Medium.ttf','OFL.txt')) { Copy-Item -LiteralPath (Join-Path $projectRoot ('assets\fonts\' + $font)) -Destination (Join-Path $siteRoot 'assets\fonts') -Force }

@@ -3,7 +3,8 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const base='http://127.0.0.1:4173';
+// Reproduce GitHub project Pages, including nested 404 URLs.
+const base='http://127.0.0.1:4173/what-the-port-win';
 const browser=spawn('C:/Program Files/Google/Chrome/Application/chrome.exe',['--headless=new','--no-sandbox','--disable-gpu','--disable-software-rasterizer','--no-first-run','--no-default-browser-check','--remote-debugging-port=9223','--user-data-dir='+path.join(project,'artifacts/site-browser-qa'),'about:blank'],{windowsHide:true,stdio:'ignore'});
 for(let i=0;i<40;i++){try{await fetch('http://127.0.0.1:9223/json/version');break;}catch{await new Promise(r=>setTimeout(r,250));}}
 const target=await (await fetch('http://127.0.0.1:9223/json/new?about:blank',{method:'PUT'})).json();
@@ -48,7 +49,7 @@ for(const route of ['/','/guide.html','/404.html']){
  check(route+' restrictive preview headers',response.headers.get('content-security-policy')?.includes("object-src 'none'")&&response.headers.get('x-content-type-options')==='nosniff');
  const references=[...html.matchAll(/(?:href|src)="([^"]+)"/g)].map(m=>m[1]);
  for(const reference of [...new Set(references)]){
-  const url=new URL(reference,base+route);if(url.origin!==base)continue;
+  const url=new URL(reference,base+route);if(url.origin!==new URL(base).origin)continue;
   const checkResponse=await fetch(url,{method:'HEAD'});check('local link '+route+' → '+reference,checkResponse.ok);
   if(url.hash){const body=await(await fetch(url)).text();check('anchor '+reference,body.includes('id="'+decodeURIComponent(url.hash.slice(1))+'"'));}
  }
@@ -58,6 +59,12 @@ check('preview rejects mutation methods',(await fetch(base+'/',{method:'POST'}))
 check('encoded path traversal is blocked',(await fetch(base+'/%2e%2e%2fREADME.md')).status===403);
 check('backslash traversal is blocked',(await fetch(base+'/%2e%2e%5cREADME.md')).status===403);
 check('ZIP endpoint returns an attachment',(await fetch(base+'/downloads/WhatThePort-Windows-x64.zip',{method:'HEAD'})).headers.get('content-disposition')?.includes('attachment'));
+const {createHash}=await import('node:crypto');
+const archive=Buffer.from(await(await fetch(base+'/downloads/WhatThePort-Windows-x64.zip')).arrayBuffer());
+const checksum=await(await fetch(base+'/downloads/SHA256SUMS.txt')).text();
+check('download matches published SHA-256',checksum.startsWith(createHash('sha256').update(archive).digest('hex')));
+check('Pages .nojekyll marker exists',(await fetch(base+'/.nojekyll')).ok);
+check('local root remains previewable',(await fetch('http://127.0.0.1:4173/')).ok);
 await fs.writeFile(path.join(project,'artifacts/site-checks.json'),JSON.stringify({passed,results},null,2));
 console.log(`${passed} site checks passed`);
 }finally{socket.close();await fetch('http://127.0.0.1:9223/json/close/'+target.id);browser.kill();}

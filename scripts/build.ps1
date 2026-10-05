@@ -22,7 +22,13 @@ if (Test-Path -LiteralPath (Join-Path $projectRoot 'src\Cli\Program.cs')) {
 Copy-Item -LiteralPath (Join-Path $projectRoot 'assets\fonts') -Destination $outputRoot -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $outputRoot -Force
 if (Test-Path -LiteralPath (Join-Path $projectRoot 'README.md')) { Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $outputRoot -Force }
-if (Test-Path -LiteralPath (Join-Path $projectRoot 'docs')) { Copy-Item -LiteralPath (Join-Path $projectRoot 'docs') -Destination $outputRoot -Recurse -Force }
+# Bundle the reading material only. The website's downloads must never be nested in their own ZIP.
+$packageDocs = [IO.Path]::GetFullPath((Join-Path $outputRoot 'docs'))
+if ($packageDocs -ne [IO.Path]::GetFullPath((Join-Path $projectRoot 'dist\docs'))) { throw 'Unexpected package documentation path.' }
+if (Test-Path -LiteralPath $packageDocs) { Remove-Item -LiteralPath $packageDocs -Recurse -Force }
+New-Item -ItemType Directory -Path $packageDocs -Force | Out-Null
+Copy-Item -Path (Join-Path $projectRoot 'docs\*.md') -Destination $packageDocs -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\images') -Destination $packageDocs -Recurse -Force
 if ($Tests) {
     & $compiler /nologo /target:exe /platform:x64 /optimize+ /warnaserror+ "/out:$outputRoot\wtp-tests.exe" "/r:$outputRoot\WhatThePort.Core.dll" (Join-Path $projectRoot 'tests\CoreTests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed.' }

@@ -7,4 +7,4 @@
 obj/
 bin/
 what-the-port-main.zip
-site/dist/downloads/*.zip
+# docs/downloads ZIP is tracked so a branch-based Pages site has a real download.

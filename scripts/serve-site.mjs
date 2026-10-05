@@ -2,7 +2,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../site/dist');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../docs');
+const prefix = '/what-the-port-win';
 const port = Number(process.argv[2] || 4173);
 const types = {'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.ttf':'font/ttf','.txt':'text/plain; charset=utf-8','.zip':'application/zip'};
 http.createServer((req,res) => {
@@ -10,6 +11,8 @@ http.createServer((req,res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {res.writeHead(405, {...headers,Allow:'GET, HEAD'});res.end();return;}
   let requested;
   try { requested = decodeURIComponent(new URL(req.url,'http://localhost').pathname); } catch {res.writeHead(400,headers);res.end();return;}
+  if (requested === prefix) {res.writeHead(302,{...headers,Location:prefix+'/'});res.end();return;}
+  if (requested.startsWith(prefix+'/')) requested = requested.slice(prefix.length);
   const target = path.resolve(root, '.' + (requested === '/' ? '/index.html' : requested));
   if (!target.startsWith(root + path.sep) || requested.includes('\\') || requested.includes('\0')) {res.writeHead(403,headers);res.end();return;}
   let file=target,status=200;
