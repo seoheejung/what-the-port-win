@@ -15,11 +15,10 @@ try {
         & git commit -m $message
         if ($LASTEXITCODE -ne 0) { throw "Could not commit: $message" }
     }
-    Commit-Feature 'feat(core): add Windows listener scanner, process policies and CLI' @('.gitignore','AGENTS.md','LICENSE','src/Core','src/Cli','tests/CoreTests.cs')
-    Commit-Feature 'feat(app): add accessible WPF tray UI and saved multi-monitor placement' @('src/App','src/App.config','src/app.manifest','assets/fonts','tests/UiTests.cs','scripts/build.ps1','scripts/test.ps1','scripts/install.ps1','scripts/package.ps1','launch.cmd')
-    Commit-Feature 'docs: add Korean product guide and generated screenshots' @('README.md','DESIGN.md','docs/usage.md','docs/checklist.md','docs/images','.project/plan.md','.project/verification.md','.project/readme-image.md')
-    Commit-Feature 'feat(site): add responsive Windows download and product pages' @('site','scripts/serve-site.mjs','scripts/prepare-site.ps1','scripts/check-site.mjs')
-    Commit-Feature 'test(audit): document security findings and accessibility checks' @('docs/security-audit.md','docs/accessibility-audit.md','tests/SecurityAudit.cs','tests/TerminalAuditFixture.cs','scripts/security-audit.ps1','scripts/commit-features.ps1','.project/commit-plan.md')
+    Commit-Feature 'fix(core): protect work sessions and preserve partial stop outcomes' @('src/Core','tests/CoreTests.cs')
+    Commit-Feature 'feat(app): add Korean and English UI with aligned server rows' @('src/App','tests/UiTests.cs','README.md','docs/usage.md','docs/images')
+    Commit-Feature 'feat(site): move Windows downloads to docs for GitHub Pages' @('.gitignore','site','docs/index.html','docs/guide.html','docs/404.html','docs/.nojekyll','docs/LICENSE.txt','docs/assets','docs/downloads','docs/publishing.md','scripts/build.ps1','scripts/serve-site.mjs','scripts/prepare-site.ps1','scripts/check-site.mjs')
+    Commit-Feature 'docs: record localization and Pages verification' @('docs/security-audit.md','docs/accessibility-audit.md','docs/checklist.md','.project/verification.md','.project/commit-plan.md','scripts/commit-features.ps1')
     if ($Push) {
         $branch = (& git branch --show-current).Trim()
         if (-not $branch) { throw 'Cannot push a detached HEAD.' }
