@@ -1,0 +1,10 @@
+/dist/
+/artifacts/
+*.user
+*.suo
+*.log
+.vs/
+obj/
+bin/
+what-the-port-main.zip
+site/dist/downloads/*.zip
