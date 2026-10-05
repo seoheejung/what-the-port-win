@@ -42,7 +42,8 @@
 
 ## 검증·한계
 
-- Core/통합 88개, 앱 UI 77개, CLI 2개 및 live smoke 통과. 연결된 4개 모니터의 실제 물리 창 배치 확인.
+- Core/통합 88개, 앱 UI 82개, CLI 2개, 다중 인스턴스 시작 3개 및 live smoke 통과. 연결된 4개 모니터의 실제 물리 창 배치 확인.
+- EXE 실행 직후 포커스 상실로 인한 창 숨김 방지, 첫 조작 이후 자동 숨김·Esc·× 검증. 다른 폴더의 두 EXE로 기존 인스턴스 열기·숨김 후 다시 열기 확인.
 - `node scripts/check-site.mjs`: 실제 Chromium 렌더링·키 입력·접근성 트리·HTTP 점검 90개 통과. `/what-the-port-win/` 경로의 중첩 404, 다운로드 체크섬 포함.
 - 캡처: `artifacts/site-screenshots`의 PC·모바일 화면.
 - 미실시: Narrator/NVDA 실제 음성 청취, 점자 장치, 실제 터치 기기, OS 고대비 전체 앱 검수, 물리 혼합 DPI 이동.

@@ -1,0 +1,59 @@
+$ErrorActionPreference = 'Stop'
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$artifactRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'artifacts'))
+$testId = [Guid]::NewGuid().ToString('N')
+$fixtureRoot = [IO.Path]::GetFullPath((Join-Path $artifactRoot ('startup-' + $testId)))
+if (-not $fixtureRoot.StartsWith($artifactRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Unexpected fixture path.' }
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$ownedProcesses = New-Object 'Collections.Generic.List[Diagnostics.Process]'
+function Visible-Window([int]$processId) {
+    $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $processId)
+    $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $condition)
+    foreach ($window in $windows) { if ($window.Current.Name.StartsWith('Servers') -and $window.Current.Name.EndsWith('What the Port') -and -not $window.Current.IsOffscreen) { return $window } }
+    return $null
+}
+function Start-Fixture([string]$folder, [switch]$Background) {
+    $arguments = @('--demo', '--language', 'en', '--test-instance', $testId)
+    if ($Background) { $arguments += '--background' }
+    $process = Start-Process -FilePath (Join-Path $fixtureRoot ($folder + '\WhatThePort.exe')) -ArgumentList $arguments -WorkingDirectory (Join-Path $fixtureRoot $folder) -WindowStyle Hidden -PassThru
+    $ownedProcesses.Add($process)
+    return $process
+}
+function Check-Secondary([Diagnostics.Process]$process) {
+    if (-not $process.WaitForExit(5000) -or $process.ExitCode -ne 0) { throw 'Secondary instance did not hand off successfully.' }
+}
+try {
+    foreach ($folder in @('first', 'downloaded-copy')) {
+        $target = Join-Path $fixtureRoot $folder
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+        foreach ($file in @('WhatThePort.exe','WhatThePort.exe.config','WhatThePort.Core.dll','fonts')) { Copy-Item -LiteralPath (Join-Path $projectRoot ('dist\' + $file)) -Destination $target -Recurse -Force }
+    }
+    $primary = Start-Fixture 'first' -Background
+    if (-not $primary.WaitForInputIdle(5000)) { throw 'Primary instance did not initialize.' }
+    Start-Sleep -Milliseconds 200
+    if ($null -ne (Visible-Window $primary.Id)) { throw 'Background startup opened a panel.' }
+    Check-Secondary (Start-Fixture 'downloaded-copy' -Background)
+    if ($null -ne (Visible-Window $primary.Id)) { throw 'Background relaunch unexpectedly opened a panel.' }
+    Write-Output 'PASS startup: repeated background launch stays in tray'
+
+    Check-Secondary (Start-Fixture 'downloaded-copy')
+    $window = $null
+    for ($attempt = 0; $attempt -lt 30 -and $null -eq $window; $attempt++) { Start-Sleep -Milliseconds 100; $window = Visible-Window $primary.Id }
+    if ($null -eq $window -or $primary.HasExited) { throw 'Explicit relaunch did not reveal the existing instance.' }
+    Write-Output 'PASS startup: a second executable copy opens the original instance'
+
+    $hideCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'Hide to tray')
+    $hide = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $hideCondition)
+    $hide.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 200
+    if ($null -ne (Visible-Window $primary.Id)) { throw 'Explicit hide did not hide the panel.' }
+    Check-Secondary (Start-Fixture 'downloaded-copy')
+    $window = $null
+    for ($attempt = 0; $attempt -lt 30 -and $null -eq $window; $attempt++) { Start-Sleep -Milliseconds 100; $window = Visible-Window $primary.Id }
+    if ($null -eq $window) { throw 'Hidden primary instance did not reopen.' }
+    Write-Output 'PASS startup: relaunch reopens an explicitly hidden panel'
+} finally {
+    foreach ($process in $ownedProcesses) { try { if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit(5000) | Out-Null } } finally { $process.Dispose() } }
+    if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force }
+}

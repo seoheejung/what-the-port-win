@@ -15,10 +15,8 @@ try {
         & git commit -m $message
         if ($LASTEXITCODE -ne 0) { throw "Could not commit: $message" }
     }
-    Commit-Feature 'fix(core): protect work sessions and preserve partial stop outcomes' @('src/Core','tests/CoreTests.cs')
-    Commit-Feature 'feat(app): add Korean and English UI with aligned server rows' @('src/App','tests/UiTests.cs','README.md','docs/usage.md','docs/images')
-    Commit-Feature 'feat(site): move Windows downloads to docs for GitHub Pages' @('.gitignore','site','docs/index.html','docs/guide.html','docs/404.html','docs/.nojekyll','docs/LICENSE.txt','docs/assets','docs/downloads','docs/publishing.md','scripts/build.ps1','scripts/serve-site.mjs','scripts/prepare-site.ps1','scripts/check-site.mjs')
-    Commit-Feature 'docs: record localization and Pages verification' @('docs/security-audit.md','docs/accessibility-audit.md','docs/checklist.md','.project/verification.md','.project/commit-plan.md','scripts/commit-features.ps1')
+    Commit-Feature 'docs: link README to the published GitHub Pages site' @('README.md')
+    Commit-Feature 'fix(app): reveal the existing panel on executable relaunch' @('src/App/InstanceActivation.cs','src/App/Program.cs','src/App/Panel.cs','tests/UiTests.cs','scripts/test.ps1','scripts/test-startup.ps1','docs/usage.md','docs/guide.html','docs/index.html','docs/downloads','docs/accessibility-audit.md','.project/verification.md','.project/commit-plan.md','scripts/commit-features.ps1')
     if ($Push) {
         $branch = (& git branch --show-current).Trim()
         if (-not $branch) { throw 'Cannot push a detached HEAD.' }

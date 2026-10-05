@@ -23,3 +23,4 @@ if (-not $smoke.WaitForExit(15000)) { throw 'Live app smoke test timed out.' }
 if ($smoke.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $report)) { throw 'Live app smoke test failed.' }
 if ((Get-Content -LiteralPath $report -Raw) -notmatch 'result=PASS') { throw 'Live app report failed.' }
 Write-Output 'PASS live app: tray, window handle and native scanning'
+& (Join-Path $PSScriptRoot 'test-startup.ps1')

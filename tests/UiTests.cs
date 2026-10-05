@@ -62,9 +62,23 @@ public static class UiTests {
             var pin=(Button)window.FindName("Pin");Click(pin);Check("pin toggles",pin.Content.ToString()=="◆");
             Check("pin state has a meaningful accessible name",UIElementAutomationPeer.CreatePeerForElement(pin).GetName()=="Unpin panel");
             LocalizationTests();
+            LaunchVisibilityTests();
         }catch(Exception e){failed++;Console.WriteLine("FAIL UI exception: "+e);}
         finally{if(panel!=null)panel.Quit();else app.Shutdown();}
         Console.WriteLine("\n"+passed+" UI passed, "+failed+" failed");return failed==0?0:1;
+    }
+    static void LaunchVisibilityTests(){
+        // Use a normal demo panel: snapshot panels intentionally suppress auto-hide.
+        window.Hide();panel=new WhatThePort.App.Panel(true,false,null,"en");window=panel.Window;window.Opacity=0;
+        var deactivate=typeof(WhatThePort.App.Panel).GetMethod("OnDeactivated",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance);
+        panel.ShowFromLaunch();Layout();deactivate.Invoke(panel,new object[]{window,EventArgs.Empty});
+        Check("explicit launch remains visible if another window takes focus",window.IsVisible);
+        var mouse=new MouseButtonEventArgs(Mouse.PrimaryDevice,0,MouseButton.Left){RoutedEvent=Mouse.PreviewMouseDownEvent};window.RaiseEvent(mouse);
+        deactivate.Invoke(panel,new object[]{window,EventArgs.Empty});
+        Check("normal auto-hide resumes after user interaction",!window.IsVisible);
+        panel.ShowFromLaunch();Layout();Click((Button)window.FindName("Hide"));Check("explicit close still hides a newly launched panel",!window.IsVisible);
+        panel.ShowFromLaunch();Layout();((Button)window.FindName("Back")).Focus();Press(Key.Escape);Check("Escape still hides a newly launched panel",!window.IsVisible);
+        panel.Show();Layout();deactivate.Invoke(panel,new object[]{window,EventArgs.Empty});Check("ordinary tray or hotkey opening retains auto-hide",!window.IsVisible);
     }
     static void LocalizationTests(){
         var snapshot=WhatThePort.App.Demo.Create();snapshot.Servers[0].Name="Settings";snapshot.Servers[0].Protected=true;snapshot.Servers[0].ProtectionReason="This app or a parent process. Stopping it could close your working session.";

@@ -35,6 +35,7 @@ namespace WhatThePort.App {
         Snapshot current=new Snapshot();
         string view="list",detailKey;
         bool scanning,acting,pinned,closing,processesExpanded,hotkeyRegistered,capturing;
+        bool awaitingLaunchInteraction;
         double preferredHeight=594;
         int rowIndex;
         DateTime snoozeUntil=DateTime.MinValue,cleanupAsked=DateTime.MinValue;
@@ -57,7 +58,8 @@ namespace WhatThePort.App {
             title.ToolTip=T("Drag to move. Position is saved. Ctrl+Shift+arrow keys also move the panel.");title.Cursor=Cursors.SizeAll;
             Find<Grid>("Header").MouseLeftButtonDown+=delegate(object sender,MouseButtonEventArgs e){if(e.OriginalSource==title||e.OriginalSource==sender)Window.DragMove();};
             Window.PreviewKeyDown+=OnKey;
-            Window.Deactivated+=delegate { if(!pinned&&!snapshotMode&&!acting&&view!="settings"&&view!="links")Window.Hide(); };
+            Window.PreviewMouseDown+=delegate{awaitingLaunchInteraction=false;};
+            Window.Deactivated+=OnDeactivated;
             Window.Closing+=delegate(object sender,System.ComponentModel.CancelEventArgs e){if(!closing){e.Cancel=true;Window.Hide();}};
             Window.SourceInitialized+=delegate {
                 handle=new WindowInteropHelper(Window).Handle; HwndSource.FromHwnd(handle).AddHook(Hook);
@@ -89,7 +91,9 @@ namespace WhatThePort.App {
         string Protection(Server s){return T(s.ProtectionReason??"This process is protected by the safety policy.");}
         string State(Server s){if(s.Protected)return T("Protected process");if(!String.IsNullOrEmpty(s.Warning))return strings.Error(s.Warning);if((DateTime.UtcNow-s.LastActive).TotalMinutes>=1&&s.Connections==0&&s.Cpu<2)return F("Idle {0} · no connections",strings.Duration(DateTime.UtcNow-s.LastActive));return (s.Agent==null?"":s.Agent+" · ")+F("up {0}",strings.Duration(DateTime.UtcNow-s.Started));}
         public void Show(){Show(false);}
-        void Show(bool fromTray){if(snapshotMode)return;if(view=="list"||view=="detail"||view=="cleanup")Render();Place(true,fromTray);Window.Show();Place(true,fromTray);Window.Activate();Window.Focus();}
+        public void ShowFromLaunch(){Show(false,true);}
+        void Show(bool fromTray,bool fromLaunch=false){if(snapshotMode)return;awaitingLaunchInteraction=fromLaunch;if(view=="list"||view=="detail"||view=="cleanup")Render();Place(true,fromTray);Window.Show();Place(true,fromTray);Window.Activate();Window.Focus();}
+        void OnDeactivated(object sender,EventArgs e){if(!awaitingLaunchInteraction&&!pinned&&!snapshotMode&&!acting&&view!="settings"&&view!="links")Window.Hide();}
         void Place(bool opening,bool fromTray=false){
             Point? saved=settings.PanelLeft.HasValue?(Point?)new Point(settings.PanelLeft.Value,settings.PanelBottom.Value):null;
             PanelPlacement.Place(Window,preferredHeight,saved,opening,fromTray);
@@ -306,6 +310,7 @@ namespace WhatThePort.App {
             var save=Button("Save links",delegate{if(demo){Navigate("detail");Notice("Demo: project links simulated.");return;}var item=new ProjectLink{Folder=folder.Text.Trim(),Port=s.Port,Agent=(string)agent.SelectedItem,Session=session.Text.Trim(),Preview=preview.Text.Trim()};item.Validate();if(!String.IsNullOrEmpty(s.Folder)&&!String.Equals(s.Folder.TrimEnd('\\'),item.Folder.TrimEnd('\\'),StringComparison.OrdinalIgnoreCase))throw new ArgumentException("The folder must match this server's detected project folder.");store.SaveLink(item);Navigate("detail");Notice("Project links saved.");},"Save project links");save.Background=B("#F5F5F7");save.Foreground=B("#111318");Cell(buttons,save,1);footer.Children.Add(buttons);
         }
         void OnKey(object sender,KeyEventArgs e){
+            awaitingLaunchInteraction=false;
             if(Keyboard.Modifiers==(ModifierKeys.Control|ModifierKeys.Shift)&&(e.Key==Key.Left||e.Key==Key.Right||e.Key==Key.Up||e.Key==Key.Down)){
                 Window.Left+=(e.Key==Key.Left?-20:e.Key==Key.Right?20:0);Window.Top+=(e.Key==Key.Up?-20:e.Key==Key.Down?20:0);Place(false);RememberPosition();e.Handled=true;return;
             }
