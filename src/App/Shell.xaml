@@ -84,9 +84,9 @@
   <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0.5,1"><GradientStop Color="#15171C" Offset="0"/><GradientStop Color="#1C2029" Offset="0.58"/><GradientStop Color="#242B39" Offset="1"/></LinearGradientBrush></Border.Background>
   <DockPanel LastChildFill="True">
    <Grid x:Name="Header" KeyboardNavigation.TabIndex="0" DockPanel.Dock="Top" Height="54" Margin="14,0">
-    <Grid.ColumnDefinitions><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/><ColumnDefinition Width="36"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
-    <Button x:Name="Back" Height="32" Width="32" VerticalAlignment="Center" Tag="header-back" AutomationProperties.Name="Back to servers" Content="‹" FontSize="25" Padding="0" Background="Transparent" ToolTip="Back (Esc)"/>
-    <TextBlock x:Name="Title" Grid.Column="1" Text="Servers" FontWeight="SemiBold" VerticalAlignment="Center" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="68"/><ColumnDefinition Width="*"/><ColumnDefinition Width="36"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+    <Button x:Name="Back" Height="32" Width="32" HorizontalAlignment="Left" VerticalAlignment="Center" Tag="header-back" AutomationProperties.Name="Back to servers" Content="‹" FontSize="25" Padding="0" Background="Transparent" ToolTip="Back (Esc)"/>
+    <TextBlock x:Name="Title" Grid.Column="1" Text="What the Port" FontWeight="SemiBold" VerticalAlignment="Center" HorizontalAlignment="Stretch" TextAlignment="Center" TextTrimming="CharacterEllipsis"/>
     <Button x:Name="Pin" Height="32" Width="32" VerticalAlignment="Center" Tag="header-pin" AutomationProperties.Name="Keep panel open" Grid.Column="2" Content="◇" Background="Transparent" Padding="0" ToolTip="Keep panel open"/>
     <Button x:Name="Hide" Height="32" Width="32" VerticalAlignment="Center" Tag="header-hide" AutomationProperties.Name="Hide to tray" Grid.Column="3" Content="×" Background="Transparent" FontSize="19" Padding="0" ToolTip="Hide to tray (Esc)"/>
    </Grid>

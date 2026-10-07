@@ -10,11 +10,11 @@ $ownedProcesses = New-Object 'Collections.Generic.List[Diagnostics.Process]'
 function Visible-Window([int]$processId) {
     $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $processId)
     $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $condition)
-    foreach ($window in $windows) { if ($window.Current.Name.StartsWith('Servers') -and $window.Current.Name.EndsWith('What the Port') -and -not $window.Current.IsOffscreen) { return $window } }
+    foreach ($window in $windows) { if ($window.Current.Name -eq 'What the Port' -and -not $window.Current.IsOffscreen) { return $window } }
     return $null
 }
-function Start-Fixture([string]$folder, [switch]$Background) {
-    $arguments = @('--demo', '--language', 'en', '--test-instance', $testId)
+function Start-Fixture([string]$folder, [switch]$Background, [string]$InstanceId = $testId) {
+    $arguments = @('--demo', '--language', 'en', '--test-instance', $InstanceId)
     if ($Background) { $arguments += '--background' }
     $process = Start-Process -FilePath (Join-Path $fixtureRoot ($folder + '\WhatThePort.exe')) -ArgumentList $arguments -WorkingDirectory (Join-Path $fixtureRoot $folder) -WindowStyle Hidden -PassThru
     $ownedProcesses.Add($process)
@@ -29,6 +29,15 @@ try {
         New-Item -ItemType Directory -Path $target -Force | Out-Null
         foreach ($file in @('WhatThePort.exe','WhatThePort.exe.config','WhatThePort.Core.dll','fonts')) { Copy-Item -LiteralPath (Join-Path $projectRoot ('dist\' + $file)) -Destination $target -Recurse -Force }
     }
+    $direct = Start-Fixture 'downloaded-copy' -InstanceId ([Guid]::NewGuid().ToString('N'))
+    if (-not $direct.WaitForInputIdle(5000)) { throw 'Direct GUI executable did not initialize.' }
+    $window = $null
+    for ($attempt = 0; $attempt -lt 30 -and $null -eq $window; $attempt++) { Start-Sleep -Milliseconds 100; $window = Visible-Window $direct.Id }
+    if ($null -eq $window) { throw 'Direct GUI executable did not show its panel.' }
+    Write-Output 'PASS startup: WhatThePort.exe opens directly without the CLI'
+    $direct.Kill()
+    $direct.WaitForExit(5000) | Out-Null
+
     $primary = Start-Fixture 'first' -Background
     if (-not $primary.WaitForInputIdle(5000)) { throw 'Primary instance did not initialize.' }
     Start-Sleep -Milliseconds 200

@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation;
@@ -19,13 +18,14 @@ using System.Windows.Threading;
 namespace WhatThePort.App {
     public sealed class Panel {
         public Window Window;
-        readonly StackPanel body,footer;
-        readonly TextBlock title,status,message;
-        readonly Border messageBox;
-        readonly Button back,pin;
+        StackPanel body,footer;
+        TextBlock title,status,message;
+        Border messageBox;
+        Button back,pin;
         readonly Store store;
         readonly Scanner scanner=new Scanner();
         readonly DispatcherTimer timer=new DispatcherTimer();
+        readonly DispatcherTimer releaseTimer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(30)};
         readonly Dictionary<string,DateTime> alerted=new Dictionary<string,DateTime>();
         readonly HashSet<string> selected=new HashSet<string>();
         readonly bool demo,snapshotMode;
@@ -36,44 +36,71 @@ namespace WhatThePort.App {
         string view="list",detailKey;
         bool scanning,acting,pinned,closing,processesExpanded,hotkeyRegistered,capturing;
         bool awaitingLaunchInteraction;
+        bool releasingWindow;
+        string pendingNotice;
         double preferredHeight=594;
         int rowIndex;
         DateTime snoozeUntil=DateTime.MinValue,cleanupAsked=DateTime.MinValue;
-        System.Windows.Forms.NotifyIcon tray;
-        System.Drawing.Icon normalIcon,warningIcon;
+        TrayIcon tray;
         IntPtr handle;
+        HwndSource notificationWindow;
         FontFamily mono;
+        static readonly Dictionary<string,Brush> palette=new Dictionary<string,Brush>();
+        sealed class ViewBookmark { public string Tag; public DateTime? ChartTime; public double Scroll; }
+        ViewBookmark suspendedView;
         public Panel(bool isDemo,bool snapshot,string storageRoot=null,string language=null) {
+            // This small, periodically updated panel does not need a GPU device
+            // and its driver allocations. Set the preference before creating the window.
+            RenderOptions.ProcessRenderMode=RenderMode.SoftwareOnly;
             demo=isDemo; snapshotMode=snapshot;
             store=new Store(storageRoot ?? (demo ? Path.Combine(Path.GetTempPath(),"WhatThePort-demo") : null));
             settings=demo?new Settings():store.LoadSettings();
             if(language!=null)settings.Language=language;
             settings.Validate();strings=new Strings(settings.Language);
-            using(var stream=Assembly.GetExecutingAssembly().GetManifestResourceStream("Shell.xaml")) Window=(Window)XamlReader.Load(stream);
+            timer.Tick+=async delegate { await Refresh(); };
+            timer.Interval=TimeSpan.FromSeconds(settings.ScanSeconds);
+            releaseTimer.Tick+=delegate{SuspendWindow();};
+            if(demo)current=Demo.Create();
+            if(!snapshotMode)CreateTray();
+            if(demo||snapshotMode){EnsureWindow();Render();}
+            if(!String.IsNullOrEmpty(store.LastError))Notice(store.LastError);
+        }
+        public bool IsVisible {get{return Window!=null&&Window.IsVisible;}}
+        void EnsureWindow(){
+            if(Window!=null)return;
+            Window=(Window)Application.LoadComponent(new Uri("/WhatThePort;component/Shell.xaml",UriKind.Relative));
+            Application.Current.MainWindow=Window;
             body=Find<StackPanel>("Body"); footer=Find<StackPanel>("Footer"); title=Find<TextBlock>("Title"); status=Find<TextBlock>("Status"); message=Find<TextBlock>("Message"); messageBox=Find<Border>("MessageBox"); back=Find<Button>("Back"); pin=Find<Button>("Pin");
             var fonts=new Uri(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"fonts")+Path.DirectorySeparatorChar);
             Window.FontFamily=new FontFamily(fonts,"./#Geist"); mono=new FontFamily(fonts,"./#Geist Mono");
             Find<Button>("Hide").Click+=delegate{Window.Hide();}; back.Click+=delegate{Navigate("list");};
             pin.Click+=delegate{pinned=!pinned; pin.Content=pinned?"◆":"◇"; pin.ToolTip=T(pinned?"Unpin panel":"Keep panel open");AutomationProperties.SetName(pin,(string)pin.ToolTip);};
+            pin.Content=pinned?"◆":"◇";
             title.ToolTip=T("Drag to move. Position is saved. Ctrl+Shift+arrow keys also move the panel.");title.Cursor=Cursors.SizeAll;
             Find<Grid>("Header").MouseLeftButtonDown+=delegate(object sender,MouseButtonEventArgs e){if(e.OriginalSource==title||e.OriginalSource==sender)Window.DragMove();};
             Window.PreviewKeyDown+=OnKey;
             Window.PreviewMouseDown+=delegate{awaitingLaunchInteraction=false;};
             Window.Deactivated+=OnDeactivated;
-            Window.Closing+=delegate(object sender,System.ComponentModel.CancelEventArgs e){if(!closing){e.Cancel=true;Window.Hide();}};
+            Window.IsVisibleChanged+=delegate{if(IsVisible)releaseTimer.Stop();else if(!closing&&!releasingWindow){ReleaseTransientView();if(!demo&&!snapshotMode)releaseTimer.Start();}};
+            Window.Closing+=delegate(object sender,System.ComponentModel.CancelEventArgs e){if(!closing&&!releasingWindow){e.Cancel=true;Window.Hide();}};
             Window.SourceInitialized+=delegate {
-                handle=new WindowInteropHelper(Window).Handle; HwndSource.FromHwnd(handle).AddHook(Hook);
-                if(!demo){hotkeyRegistered=Native.RegisterHotKey(handle,1,0x4003,0x50);if(!hotkeyRegistered)Notice("Ctrl+Alt+P is already in use. Open the panel from its tray icon.");}
+                HwndSource.FromHwnd(new WindowInteropHelper(Window).Handle).AddHook(Hook);
             };
-            timer.Tick+=async delegate { await Refresh(); };
-            timer.Interval=TimeSpan.FromSeconds(settings.ScanSeconds);
-            if(demo)current=Demo.Create();
-            if(!snapshotMode)CreateTray();
-            Render();
-            if(!String.IsNullOrEmpty(store.LastError))Notice(store.LastError);
+            Notice(pendingNotice);
+        }
+        void SuspendWindow(){
+            // Keep the native notification window alive; release an idle panel after 30s.
+            if(acting)return;
+            releaseTimer.Stop();
+            if(demo||snapshotMode||Window==null||IsVisible||closing||view=="settings"||view=="links")return;
+            ReleaseTransientView();releasingWindow=true;
+            try {
+                Window.Close();Application.Current.MainWindow=null;
+                Window=null;body=null;footer=null;title=null;status=null;message=null;messageBox=null;back=null;pin=null;mono=null;
+            } finally {releasingWindow=false;}
         }
         T Find<T>(string name) where T:FrameworkElement{return (T)Window.FindName(name);}
-        static Brush B(string hex){return (Brush)new BrushConverter().ConvertFromString(hex);}
+        static Brush B(string hex){Brush brush;if(!palette.TryGetValue(hex,out brush)){brush=(Brush)new BrushConverter().ConvertFromString(hex);brush.Freeze();palette.Add(hex,brush);}return brush;}
         string T(string value){return strings.T(value);}
         string F(string template,params object[] values){return strings.F(template,values);}
         TextBlock Text(string value,double size,string color,bool translate=true){return new TextBlock{Text=translate?T(value):value,FontSize=size,Foreground=B(color),VerticalAlignment=VerticalAlignment.Center,TextTrimming=TextTrimming.CharacterEllipsis};}
@@ -81,6 +108,7 @@ namespace WhatThePort.App {
         Button Button(string label,Action action,string tip){var b=new Button{Content=T(label),ToolTip=T(tip),Tag="action-"+(tip??label)};AutomationProperties.SetName(b,T(tip??label));b.Click+=delegate{Try(action);};return b;}
         void Try(Action action){try{action();}catch(FormatException){Notice(T("Enter valid numbers for the sampling and alert thresholds."));}catch(OverflowException){Notice(T("Enter valid numbers for the sampling and alert thresholds."));}catch(Exception e){Notice(e.Message);}}
         void Notice(string value){
+            pendingNotice=value;if(Window==null)return;
             message.Text=strings.Error(value);messageBox.Visibility=String.IsNullOrEmpty(value)?Visibility.Collapsed:Visibility.Visible;
             if(!String.IsNullOrEmpty(value)){var peer=UIElementAutomationPeer.CreatePeerForElement(message);if(peer!=null)peer.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);}
         }
@@ -92,8 +120,24 @@ namespace WhatThePort.App {
         string State(Server s){if(s.Protected)return T("Protected process");if(!String.IsNullOrEmpty(s.Warning))return strings.Error(s.Warning);if((DateTime.UtcNow-s.LastActive).TotalMinutes>=1&&s.Connections==0&&s.Cpu<2)return F("Idle {0} · no connections",strings.Duration(DateTime.UtcNow-s.LastActive));return (s.Agent==null?"":s.Agent+" · ")+F("up {0}",strings.Duration(DateTime.UtcNow-s.Started));}
         public void Show(){Show(false);}
         public void ShowFromLaunch(){Show(false,true);}
-        void Show(bool fromTray,bool fromLaunch=false){if(snapshotMode)return;awaitingLaunchInteraction=fromLaunch;if(view=="list"||view=="detail"||view=="cleanup")Render();Place(true,fromTray);Window.Show();Place(true,fromTray);Window.Activate();Window.Focus();}
-        void OnDeactivated(object sender,EventArgs e){if(!awaitingLaunchInteraction&&!pinned&&!snapshotMode&&!acting&&view!="settings"&&view!="links")Window.Hide();}
+        void Show(bool fromTray,bool fromLaunch=false){
+            if(snapshotMode)return;
+            EnsureWindow();releaseTimer.Stop();awaitingLaunchInteraction=fromLaunch;
+            if(view=="list"||view=="detail"||view=="cleanup")Render();
+            Place(true,fromTray);Window.Show();Place(true,fromTray);Window.Activate();Window.Focus();
+            if(suspendedView!=null){var bookmark=suspendedView;suspendedView=null;RestoreView(bookmark);}
+        }
+        void OnDeactivated(object sender,EventArgs e){if(!closing&&!releasingWindow&&IsVisible&&!awaitingLaunchInteraction&&!pinned&&!snapshotMode&&!acting&&view!="settings"&&view!="links")Window.Hide();}
+        void ReleaseTransientView(){
+            // Lists and charts are reconstructed on opening. Keep unsaved forms intact.
+            if(demo||snapshotMode||closing||Window==null||(view!="list"&&view!="detail"&&view!="cleanup")||body.Children.Count==0)return;
+            var focused=(Keyboard.FocusedElement??FocusManager.GetFocusedElement(Window)) as DependencyObject;
+            while(focused!=null&&!((focused as FrameworkElement)!=null&&((FrameworkElement)focused).Tag is string))focused=VisualTreeHelper.GetParent(focused);
+            var chart=focused as Chart;
+            suspendedView=new ViewBookmark{Tag=focused==null?null:((FrameworkElement)focused).Tag as string,ChartTime=chart==null?null:chart.SelectedTime,Scroll=Find<ScrollViewer>("Scroll").VerticalOffset};
+            FocusManager.SetFocusedElement(Window,null);
+            body.Children.Clear();footer.Children.Clear();
+        }
         void Place(bool opening,bool fromTray=false){
             Point? saved=settings.PanelLeft.HasValue?(Point?)new Point(settings.PanelLeft.Value,settings.PanelBottom.Value):null;
             PanelPlacement.Place(Window,preferredHeight,saved,opening,fromTray);
@@ -108,27 +152,29 @@ namespace WhatThePort.App {
             try {
                 Settings config=settings.Copy();var next=await Task.Run(()=>{lock(scanner)return scanner.Scan(config);});current=next;
                 selected.RemoveWhere(k=>!current.Servers.Any(s=>s.Key==k&&!s.Protected));
-                if(Window.IsVisible&&(view=="list"||view=="detail"||view=="cleanup"))Render();
+                if(IsVisible&&(view=="list"||view=="detail"||view=="cleanup"))Render();else if(!IsVisible)ReleaseTransientView();
                 UpdateTray(); CheckAlerts();
                 if(settings.Cleanup=="Automatic"&&view!="settings"&&view!="cleanup") {
                     var targets=current.Servers.Where(s=>Policy.CleanupCandidate(s,settings,DateTime.UtcNow)).ToList();
                     if(targets.Count>0)await StopServers(targets,true);
                 }
-            }catch(Exception e){current.Error=e.Message;Notice("Scan unavailable. "+e.Message);status.Text=T("SCAN PAUSED · retrying automatically");}
+            }catch(Exception e){current.Error=e.Message;Notice("Scan unavailable. "+e.Message);if(status!=null)status.Text=T("SCAN PAUSED · retrying automatically");}
             finally{scanning=false;}
         }
-        void Navigate(string target){view=target;Notice(null);Find<ScrollViewer>("Scroll").ScrollToTop();Render();if(Window.IsVisible){
+        void Navigate(string target){EnsureWindow();view=target;suspendedView=null;Notice(null);Find<ScrollViewer>("Scroll").ScrollToTop();Render();if(IsVisible){
             if(view=="list"){var row=body.Children.OfType<Button>().FirstOrDefault(b=>(b.Tag as string)=="server-"+detailKey);if(row!=null){row.Focus();return;}}
             if(view=="settings"||view=="links"){var input=Descendants(body).OfType<TextBox>().FirstOrDefault();if(input!=null){input.Focus();return;}}
             back.Focus();
         }}
         void Render(){
+            if(Window==null)return;
             // Preserve keyboard focus and scroll position through live refreshes.
             var focusedElement=Keyboard.FocusedElement as DependencyObject;
             while(focusedElement!=null&&!((focusedElement as FrameworkElement)!=null&&((FrameworkElement)focusedElement).Tag is string))focusedElement=VisualTreeHelper.GetParent(focusedElement);
             string focused=focusedElement==null?null:((FrameworkElement)focusedElement).Tag as string;
             var focusedChart=focusedElement as Chart;DateTime? chartTime=focusedChart==null?null:focusedChart.SelectedTime;
             double offset=Find<ScrollViewer>("Scroll").VerticalOffset;
+            if(suspendedView!=null){focused=suspendedView.Tag;chartTime=suspendedView.ChartTime;offset=suspendedView.Scroll;suspendedView=null;}
             body.Children.Clear();footer.Children.Clear();
             back.Content=view=="list"?(object)DotGrid():"‹";back.IsEnabled=true;back.FontSize=25;back.Foreground=B("#A4A6AF");
             AutomationProperties.SetName(back,T(view=="list"?"Servers home":"Back to servers"));back.ToolTip=T(view=="list"?"Servers home":"Back to servers (Esc)");
@@ -137,9 +183,13 @@ namespace WhatThePort.App {
             status.Text=demo?T("DEMO · SAMPLE DATA · NO SYSTEM ACTIONS"):F("LOCAL ONLY   ·   CTRL + ALT + P   ·   {0}s",settings.ScanSeconds);
             if(view=="detail")Detail();else if(view=="cleanup")List(true);else if(view=="settings")SettingsView();else if(view=="links")LinksView();else List(false);
             if(capturing||!Window.IsVisible)Window.Height=preferredHeight;else Place(false);
-            Window.Title=title.Text+" · What the Port";
-            Find<ScrollViewer>("Scroll").ScrollToVerticalOffset(offset);
-            if(focused!=null) {Window.UpdateLayout();foreach(var element in Descendants(Window).OfType<FrameworkElement>())if((element.Tag as string)==focused){if(element is Chart&&chartTime.HasValue)((Chart)element).SelectTime(chartTime.Value);element.Focus();element.BringIntoView();break;}}
+            Window.Title=view=="list"?"What the Port":title.Text+" · What the Port";
+            var bookmark=new ViewBookmark{Tag=focused,ChartTime=chartTime,Scroll=offset};
+            if(IsVisible)RestoreView(bookmark);else suspendedView=bookmark;
+        }
+        void RestoreView(ViewBookmark bookmark){
+            Window.UpdateLayout();Find<ScrollViewer>("Scroll").ScrollToVerticalOffset(bookmark.Scroll);
+            if(bookmark.Tag!=null)foreach(var element in Descendants(Window).OfType<FrameworkElement>())if((element.Tag as string)==bookmark.Tag){if(element is Chart&&bookmark.ChartTime.HasValue)((Chart)element).SelectTime(bookmark.ChartTime.Value);element.Focus();element.BringIntoView();break;}
         }
         static IEnumerable<DependencyObject> Descendants(DependencyObject root){for(int i=0;i<VisualTreeHelper.GetChildrenCount(root);i++){var child=VisualTreeHelper.GetChild(root,i);yield return child;foreach(var node in Descendants(child))yield return node;}}
         void Summary(bool cleanup){
@@ -156,7 +206,7 @@ namespace WhatThePort.App {
         }
         static void Segment(Grid bar,double value,string color){if(value<=0)return;bar.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(value,GridUnitType.Star)});var segment=new Border{Background=B(color),CornerRadius=new CornerRadius(1),Margin=new Thickness(0,0,1,0)};Cell(bar,segment,bar.ColumnDefinitions.Count-1);}
         void List(bool cleanup){
-            title.Text=T(cleanup?"Clean up":"Servers");preferredHeight=cleanup?614:594;Summary(cleanup);Rule();
+            title.Text=T(cleanup?"Clean up":"What the Port");preferredHeight=cleanup?614:594;Summary(cleanup);Rule();
             if(current.Servers.Count==0){
                 var empty=new StackPanel{Margin=new Thickness(20,42,20,45),HorizontalAlignment=HorizontalAlignment.Center};
                 var glyph=Mono(":_",38,"#7DDBE0");glyph.HorizontalAlignment=HorizontalAlignment.Center;empty.Children.Add(glyph);
@@ -323,40 +373,43 @@ namespace WhatThePort.App {
             else if(view=="detail"){string action=e.Key==Key.O?"open":e.Key==Key.T?"terminal":e.Key==Key.A?"session":e.Key==Key.V?"preview":null;if(action!=null){Try(delegate{RunAction(action);});e.Handled=true;}}
         }
         IntPtr Hook(IntPtr hwnd,int msg,IntPtr wparam,IntPtr lparam,ref bool handled){
-            if(msg==0x0312||msg==0x8001){if(Window.IsVisible)Window.Hide();else Show();handled=true;}
+            if(msg==0x0312||msg==0x8001){if(IsVisible)Window.Hide();else Show();handled=true;}
             // Re-evaluate after Windows has applied taskbar, display or DPI changes.
             if(!snapshotMode&&(msg==0x001A||msg==0x007E||msg==0x02E0||msg==0x0232))
-                Window.Dispatcher.BeginInvoke(new Action(delegate{if(Window.IsVisible&&!closing){Place(false);if(msg==0x0232)RememberPosition();}}));
+                Application.Current.Dispatcher.BeginInvoke(new Action(delegate{if(IsVisible&&!closing){Place(false);if(msg==0x0232)RememberPosition();}}));
             return IntPtr.Zero;
         }
         void CreateTray(){
-            normalIcon=Icon(false);warningIcon=Icon(true);tray=new System.Windows.Forms.NotifyIcon{Icon=normalIcon,Text="What the Port · monitoring",Visible=true};
-            tray.MouseClick+=delegate(object sender,System.Windows.Forms.MouseEventArgs e){if(e.Button==System.Windows.Forms.MouseButtons.Left){if(Window.IsVisible)Window.Hide();else Show(true);}};
+            notificationWindow=new HwndSource(new HwndSourceParameters("What the Port notifications"){Width=0,Height=0,WindowStyle=unchecked((int)0x80000000),ExtendedWindowStyle=0x80});
+            handle=notificationWindow.Handle;notificationWindow.AddHook(Hook);
+            if(!demo){hotkeyRegistered=Native.RegisterHotKey(handle,1,0x4003,0x50);if(!hotkeyRegistered)Notice("Ctrl+Alt+P is already in use. Open the panel from its tray icon.");}
+            tray=new TrayIcon(notificationWindow);
+            tray.Click+=delegate{if(IsVisible)Window.Hide();else Show(true);};
             UpdateTrayMenu();
-            tray.BalloonTipClicked+=delegate{Show();};
+            tray.BalloonClick+=delegate{Show();};
         }
         void UpdateTrayMenu(){
-            if(tray==null)return;var old=tray.ContextMenuStrip;
-            var menu=new System.Windows.Forms.ContextMenuStrip();menu.Items.Add(T("Open What the Port"),null,delegate{Show();});menu.Items.Add(T("Clean up…"),null,delegate{EnterCleanup();Show();});menu.Items.Add(T("Settings…"),null,delegate{Navigate("settings");Show();});menu.Items.Add(T("Snooze alerts for 1 hour"),null,delegate{snoozeUntil=DateTime.UtcNow.AddHours(1);});menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());menu.Items.Add(T("Quit"),null,delegate{Quit();});tray.ContextMenuStrip=menu;if(old!=null)old.Dispose();UpdateTray();
+            if(tray==null)return;
+            tray.SetMenu(new[]{T("Open What the Port"),T("Clean up…"),T("Settings…"),T("Snooze alerts for 1 hour"),null,T("Quit")},delegate(int item){if(item==0)Show();else if(item==1){EnterCleanup();Show();}else if(item==2){Navigate("settings");Show();}else if(item==3)snoozeUntil=DateTime.UtcNow.AddHours(1);else if(item==5)Quit();});UpdateTray();
         }
         static UIElement DotGrid(){var canvas=new Canvas{Width=19,Height=19};for(int y=0;y<4;y++)for(int x=0;x<4;x++){var dot=new System.Windows.Shapes.Ellipse{Width=3,Height=3,Fill=B("#FFB224")};Canvas.SetLeft(dot,x*5);Canvas.SetTop(dot,y*5);canvas.Children.Add(dot);}return canvas;}
-        static System.Drawing.Icon Icon(bool warning){using(var bitmap=new System.Drawing.Bitmap(32,32)){using(var g=System.Drawing.Graphics.FromImage(bitmap)){g.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;using(var brush=new System.Drawing.SolidBrush(warning?System.Drawing.Color.FromArgb(255,178,36):System.Drawing.Color.FromArgb(125,219,224))){for(int y=0;y<4;y++)for(int x=0;x<4;x++)g.FillEllipse(brush,3+x*7,3+y*7,4,4);}}IntPtr h=bitmap.GetHicon();try{using(var icon=System.Drawing.Icon.FromHandle(h))return (System.Drawing.Icon)icon.Clone();}finally{Native.DestroyIcon(h);}}}
-        void UpdateTray(){if(tray==null)return;tray.Text="What the Port · "+F("{0} servers · monitoring",current.Servers.Count)+" · "+Format.Total(current.ServerMemory);tray.Icon=current.Servers.Any(s=>s.Warning!=null)?warningIcon:normalIcon;}
-        void Notify(string heading,string text){if(tray!=null&&settings.Notifications&&DateTime.UtcNow>=snoozeUntil){tray.BalloonTipTitle=T(heading);tray.BalloonTipText=strings.Error(text);tray.ShowBalloonTip(6000);}}
+        void UpdateTray(){if(tray==null)return;tray.Update("What the Port · "+F("{0} servers · monitoring",current.Servers.Count)+" · "+Format.Total(current.ServerMemory),current.Servers.Any(s=>s.Warning!=null));}
+        void Notify(string heading,string text){if(tray!=null&&settings.Notifications&&DateTime.UtcNow>=snoozeUntil)tray.Notify(T(heading),strings.Error(text));}
         void CheckAlerts(){
             DateTime now=DateTime.UtcNow;
             foreach(var s in current.Servers.Where(s=>s.Warning!=null)){DateTime last;if(!alerted.TryGetValue(s.Key,out last)||(now-last).TotalMinutes>=15){Notify(":"+s.Port+" · "+s.Name,s.Warning);alerted[s.Key]=now;}}
             foreach(var key in alerted.Keys.Where(k=>!current.Servers.Any(s=>s.Key==k)).ToList())alerted.Remove(key);
             int count=current.Servers.Count(s=>Policy.CleanupCandidate(s,settings,now));if(settings.Cleanup=="Ask"&&count>0&&(now-cleanupAsked).TotalHours>=1){Notify("A little breathing room?",F("{0} idle server(s) are ready to clean up. Open Clean up to review.",count));cleanupAsked=now;}
         }
-        public void Quit(){closing=true;timer.Stop();if(handle!=IntPtr.Zero&&!demo)Native.UnregisterHotKey(handle,1);if(tray!=null){tray.Visible=false;tray.Dispose();}if(normalIcon!=null)normalIcon.Dispose();if(warningIcon!=null)warningIcon.Dispose();Window.Close();Application.Current.Shutdown();}
+        public void Quit(){closing=true;timer.Stop();releaseTimer.Stop();if(handle!=IntPtr.Zero&&!demo)Native.UnregisterHotKey(handle,1);if(tray!=null)tray.Dispose();if(Window!=null)Window.Close();if(notificationWindow!=null)notificationWindow.Dispose();Application.Current.Shutdown();}
         public async Task<bool> LiveSmoke(string report){
             settings=new Settings{Notifications=false,Cleanup="Off"};
-            new WindowInteropHelper(Window).EnsureHandle();
+            EnsureWindow();
+            IntPtr panelHandle=new WindowInteropHelper(Window).EnsureHandle();
             await Refresh();await Task.Delay(300);await Refresh();
-            bool ok=current.Error==null&&current.TotalMemory>0&&tray!=null&&tray.Visible&&handle!=IntPtr.Zero;
+            bool ok=current.Error==null&&current.TotalMemory>0&&tray!=null&&tray.Visible&&handle!=IntPtr.Zero&&panelHandle!=IntPtr.Zero;
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(report)));
-            File.WriteAllText(report,"result="+(ok?"PASS":"FAIL")+"\ntray="+(tray!=null&&tray.Visible)+"\nhotkey="+hotkeyRegistered+"\nwindowHandle="+(handle!=IntPtr.Zero)+"\nservers="+current.Servers.Count+"\ntotalMemory="+current.TotalMemory+"\nerror="+(current.Error??"none")+"\n");
+            File.WriteAllText(report,"result="+(ok?"PASS":"FAIL")+"\ntray="+(tray!=null&&tray.Visible)+"\nhotkey="+hotkeyRegistered+"\nwindowHandle="+(panelHandle!=IntPtr.Zero)+"\nservers="+current.Servers.Count+"\ntotalMemory="+current.TotalMemory+"\nerror="+(current.Error??"none")+"\n");
             Quit();return ok;
         }
         public void CaptureAll(string directory){

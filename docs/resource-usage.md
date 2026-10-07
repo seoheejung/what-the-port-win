@@ -1,0 +1,55 @@
+# 앱 자체의 CPU·메모리 사용량
+
+## 추가 경량화 결과 · 2026-10-07
+
+8GB 노트북 사용을 고려해 트레이·계측·화면 생성을 줄였다. 같은 PC의 실제 Windows 데스크톱에서 이전 소프트웨어 렌더링 배포본과 이번 빌드를 측정했다.
+
+Windows x64 / .NET Framework 4.8 / 논리 코어 16개. 기본 3초 조회, 각 상태 30초·10~11회 실제 스캔. RAM은 평균 working set, 단위는 MiB. CPU는 전체 논리 코어 대비 평균이다.
+
+| 상태 | 이전 RAM | 이번 RAM | 이전 CPU | 이번 CPU |
+|---|---:|---:|---:|---:|
+| 처음부터 트레이에 숨김 | 75.8 | 55.0 | 0.081% | 0.026% |
+| 창 표시 | 87.6 | 75.9 | 0.220% | 0.181% |
+| 표시 후 다시 숨김 | 89.4 | 75.4 | 0.129% | 0.029% |
+
+각 실행에서 루프백 TCP 테스트 서버 5개를 생성했다. 측정 중 다른 개발 서버도 감지되어 이전 빌드의 상태별 최대 서버 수는 **5 / 5 / 7개**, 이번 빌드는 **5 / 7 / 7개**였다. 서버 수가 완전히 고정된 비교는 아니다. 두 실행 모두 자동 정리·알림은 끄고 트레이 등록을 확인했다.
+
+private bytes 최대값은 이전 **69.2 / 72.3 / 73.6MiB**, 이번 **55.3 / 64.4 / 64.2MiB**였다. 원본 기록은 로컬 `artifacts/resources-software-baseline-desktop.json`과 `artifacts/resources-final-five-servers.json`에 있다. 비교에 사용한 이전 ZIP의 SHA-256은 `e2008fadd4edf0ee5852d16d233fc07af787cdd24d90f798ea614e9216404917`이다.
+
+최종 검증에서는 테스트 서버 **5개만** 감지되는 상태에서 해당 PID들을 확인하며 각 상태 15초·5회 스캔했다. 숨김 / 표시 / 다시 숨김의 평균 RAM은 **54.6 / 75.5 / 74.8MiB**, CPU는 **0.026 / 0.207 / 0.019%**였다. 30초 뒤 실제 창 해제와 이후 감시 지속도 확인했다. 기록: `artifacts/resources-final-verification.json`.
+
+55~76MiB는 8GiB의 약 0.7~0.9%에 해당한다. 실제 8GB 노트북에서 측정한 결과는 아니며, PC·화면 배율·서버 수에 따라 달라진다. 창을 한 번 연 뒤에는 WPF 등의 캐시가 남아 최초 숨김 상태의 사용량으로 완전히 돌아가지 않는다.
+
+## 변경 내용
+
+- 트레이로 시작할 때 WPF 패널 생성을 첫 열기까지 미룬다.
+- 숨기면 목록·차트 컨트롤을 비우고 30초 뒤 창을 닫아 해제한다. 트레이·단축키·감시는 별도의 작은 메시지 창으로 유지한다.
+- 다시 열면 최신 데이터·선택·핀 상태를 복원한다. 저장하지 않은 설정·링크 입력 화면은 유지한다.
+- 트레이 아이콘·메뉴·모니터 위치를 Windows API로 처리해 앱의 Windows Forms·System.Drawing 참조를 제거했다.
+- 프로세스의 생성 시각·CPU·메모리를 하나의 조회 전용 핸들에서 읽는다. 프로세스 종료 시 동일 핸들에서 신원·사용자·세션을 재확인하는 기존 정책은 유지한다.
+- XAML을 Windows 내장 WPF 마크업 컴파일러로 BAML에 미리 컴파일하고, 반복 사용되는 브러시를 공유한다. 외부 의존성을 추가하지 않았다.
+
+조회 주기는 기본 3초이며, 이력은 최근 10분·최대 601개 표본으로 제한한다. 강제 GC나 working set 비우기는 사용하지 않는다.
+
+## 재측정
+
+Windows 작업 표시줄이 있는 데스크톱에서 실행한다.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure-resources.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure-resources.ps1 -FixtureServers 5 -ReportName resources-five-servers.json
+```
+
+결과는 `artifacts/resource-usage.json` 또는 지정한 보고서에 기록한다. 숨김·표시·다시 숨김을 기본 각각 30초 측정하며, 마지막 상태 전에는 창 해제를 기다린다. `-SecondsPerState 15`로 짧게 측정하거나, `-RuntimeDirectory`로 이전 배포본을 풀어 놓은 폴더를 지정해 비교할 수 있다.
+
+실제 앱의 패널·스캐너를 격리된 설정의 별도 프로세스에서 실행한다. CPU·메모리는 Win32 API로 직접 조회한다. 테스트 서버를 지정하면 해당 PID들이 계속 감시되는지도 확인한다. 시작 직후 초기화 비용은 평균에서 제외한다. 종료 시 도구가 생성한 프로세스만 정리한다.
+
+## 동작 검증
+
+`scripts/test.ps1`: 코어 **91개**, UI **103개**, CLI, 실제 스캔·트레이 등록·직접 실행·중복 실행 검증 통과. 창 해제 후 반복 재열기, 차트 선택·핀 복원, 미저장 입력 보존, 트레이 콜백·메뉴·재등록을 포함한다. 프로세스 종료 검증은 테스트가 생성한 프로세스만 대상으로 한다.
+
+`dist/WhatThePort.exe --snapshot artifacts/screenshots`: 목록·상세·정리·설정·링크·빈 상태 6개 PNG가 이전 소프트웨어 렌더링 배포본과 모두 동일했다. 수일간 실행 시의 누수, 실제 Explorer 재시작·알림 배너 표시, 다른 PC·8GB 노트북에서의 성능은 검증하지 않았다.
+
+## 앞선 렌더링 변경 기록 · 2026-10-06
+
+WPF의 [소프트웨어 렌더링](https://learn.microsoft.com/en-us/dotnet/api/system.windows.media.renderoptions.processrendermode)을 선택한 첫 변경에서는 서버 0개·각 상태 30초 조건으로 숨김 **142.9→72.7MiB**, 표시 **160.9→86.5MiB**를 관측했다. 이는 위의 추가 경량화 비교와 별도 실행에서 얻은 기록이다.

@@ -11,7 +11,15 @@ $coreFiles = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src\Core') -F
 if ($LASTEXITCODE -ne 0) { throw 'Core compilation failed.' }
 $uiFiles = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src\App') -Filter '*.cs' | ForEach-Object FullName)
 if ($uiFiles.Count -gt 0) {
-    & $compiler /nologo /target:winexe /platform:x64 /optimize+ /warnaserror+ "/out:$outputRoot\WhatThePort.exe" "/win32manifest:$projectRoot\src\app.manifest" "/r:$outputRoot\WhatThePort.Core.dll" "/r:$framework\WPF\PresentationFramework.dll" "/r:$framework\WPF\PresentationCore.dll" "/r:$framework\WPF\WindowsBase.dll" /r:System.Xaml.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll "/resource:$projectRoot\src\App\Shell.xaml,Shell.xaml" $uiFiles
+    # Use the WPF markup compiler included with Windows; no SDK or packages.
+    & (Join-Path $framework 'MSBuild.exe') (Join-Path $PSScriptRoot 'compile-markup.proj') /nologo /verbosity:minimal
+    if ($LASTEXITCODE -ne 0) { throw 'WPF markup compilation failed.' }
+    $markupRoot = Join-Path $projectRoot 'artifacts\markup'
+    $resources = Join-Path $markupRoot 'WhatThePort.g.resources'
+    $writer = New-Object System.Resources.ResourceWriter($resources)
+    $markup = [IO.File]::OpenRead((Join-Path $markupRoot 'Shell.baml'))
+    try { $writer.AddResource('shell.baml', $markup); $writer.Generate() } finally { $writer.Dispose(); $markup.Dispose() }
+    & $compiler /nologo /target:winexe /platform:x64 /optimize+ /warnaserror+ "/out:$outputRoot\WhatThePort.exe" "/win32manifest:$projectRoot\src\app.manifest" "/r:$outputRoot\WhatThePort.Core.dll" "/r:$framework\WPF\PresentationFramework.dll" "/r:$framework\WPF\PresentationCore.dll" "/r:$framework\WPF\WindowsBase.dll" /r:System.Xaml.dll "/resource:$resources,WhatThePort.g.resources" $uiFiles
     if ($LASTEXITCODE -ne 0) { throw 'App compilation failed.' }
     Copy-Item -LiteralPath (Join-Path $projectRoot 'src\App.config') -Destination (Join-Path $outputRoot 'WhatThePort.exe.config') -Force
 }
@@ -21,7 +29,7 @@ if (Test-Path -LiteralPath (Join-Path $projectRoot 'src\Cli\Program.cs')) {
 }
 Copy-Item -LiteralPath (Join-Path $projectRoot 'assets\fonts') -Destination $outputRoot -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $outputRoot -Force
-if (Test-Path -LiteralPath (Join-Path $projectRoot 'README.md')) { Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $outputRoot -Force }
+Copy-Item -LiteralPath (Join-Path $projectRoot 'assets\portable-README.md') -Destination (Join-Path $outputRoot 'README.md') -Force
 # Bundle the reading material only. The website's downloads must never be nested in their own ZIP.
 $packageDocs = [IO.Path]::GetFullPath((Join-Path $outputRoot 'docs'))
 if ($packageDocs -ne [IO.Path]::GetFullPath((Join-Path $projectRoot 'dist\docs'))) { throw 'Unexpected package documentation path.' }

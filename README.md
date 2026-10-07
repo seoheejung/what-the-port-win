@@ -60,6 +60,8 @@
 
 **요구 환경:** Windows 10/11 x64, .NET Framework 4.8. 관리자 권한·.NET SDK·NuGet·npm 패키지 설치 불필요.
 
+**다운로드한 ZIP은 모두 압축을 푼 뒤 `WhatThePort.exe`를 실행하세요.** `wtp.exe`는 터미널용 도구이며, 인수 없이 실행하면 본체를 열고 종료합니다. DLL·설정·폰트는 본체와 함께 유지합니다. 배포 파일별 용도는 [포터블 안내문](assets/portable-README.md)에 있습니다.
+
 | 실행 방식 | 방법 |
 |---|---|
 | 바로 실행 | `launch.cmd` 또는 `dist\WhatThePort.exe` |
@@ -128,6 +130,10 @@
 - **종료 검증** — 동일 핸들의 PID·UTC 생성 시각·사용자·세션 확인 후 선택 트리 종료
 - **idle 판정** — 관측된 연결 없음 + CPU 2% 미만의 지속 시간; 절전·긴 스캔 공백 이후 관측 재시작
 
+트레이로 시작할 때는 패널을 처음 열 때까지 화면을 만들지 않습니다. 숨기면 목록·차트 컨트롤을 비우고 30초 뒤 창을 해제합니다. 감시와 알림은 계속되며, 다시 열면 최신 상태와 선택을 복원합니다. 저장하지 않은 설정·링크 입력 화면은 유지합니다. 서버별 이력은 최근 10분·최대 601개 표본으로 제한합니다.
+
+작은 패널은 [소프트웨어 렌더링](https://learn.microsoft.com/en-us/dotnet/api/system.windows.media.renderoptions.processrendermode)을 사용하며, 트레이·프로세스 계측은 Windows API로 처리합니다. 화면의 RAM·CPU는 감시 대상 서버의 수치입니다. 앱 자체 사용량은 작업 관리자 또는 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure-resources.ps1`로 확인하세요. 실제 작업 표시줄이 있는 데스크톱에서 기본 3초 주기로 숨김·표시·다시 숨김을 각각 30초 관측하고 `artifacts/resource-usage.json`에 기록합니다. `-FixtureServers 5`를 추가하면 루프백 테스트 서버 다섯 개도 감시하며, 종료 시 테스트가 생성한 프로세스만 정리합니다. [수정 전후 측정 결과](docs/resource-usage.md).
+
 ## 개인정보와 연결
 
 - 계정, 텔레메트리, 자동 업데이트 없음
@@ -140,7 +146,7 @@
 
 ## 빌드
 
-Windows 내장 .NET Framework C# 컴파일러 기반, 외부 패키지 다운로드 없음.
+Windows 내장 .NET Framework C# 컴파일러·WPF 마크업 컴파일러 기반. XAML을 BAML로 미리 컴파일하며 외부 패키지 다운로드 없음.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1

@@ -1,0 +1,20 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="CompileMarkup">
+  <PropertyGroup>
+    <FrameworkRoot>$(WINDIR)\Microsoft.NET\Framework64\v4.0.30319</FrameworkRoot>
+    <OutputPath>$(MSBuildProjectDirectory)\..\artifacts\markup\</OutputPath>
+  </PropertyGroup>
+  <UsingTask TaskName="Microsoft.Build.Tasks.Windows.MarkupCompilePass1" AssemblyFile="$(FrameworkRoot)\WPF\PresentationBuildTasks.dll" />
+  <ItemGroup>
+    <Page Include="..\src\App\Shell.xaml"><Link>Shell.xaml</Link></Page>
+    <Reference Include="$(FrameworkRoot)\mscorlib.dll" />
+    <Reference Include="$(FrameworkRoot)\System.dll" />
+    <Reference Include="$(FrameworkRoot)\System.Xaml.dll" />
+    <Reference Include="$(FrameworkRoot)\WPF\WindowsBase.dll" />
+    <Reference Include="$(FrameworkRoot)\WPF\PresentationCore.dll" />
+    <Reference Include="$(FrameworkRoot)\WPF\PresentationFramework.dll" />
+  </ItemGroup>
+  <Target Name="CompileMarkup">
+    <MakeDir Directories="$(OutputPath)" />
+    <MarkupCompilePass1 AssemblyName="WhatThePort" Language="C#" OutputType="winexe" OutputPath="$(OutputPath)" PageMarkup="@(Page)" References="@(Reference)" RootNamespace="WhatThePort.App" />
+  </Target>
+</Project>

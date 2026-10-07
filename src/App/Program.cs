@@ -19,11 +19,11 @@ namespace WhatThePort.App {
                     var app=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};
                     app.DispatcherUnhandledException+=delegate(object sender,System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e){MessageBox.Show(e.Exception.Message,"What the Port",MessageBoxButton.OK,MessageBoxImage.Error);e.Handled=true;};
                     int languageIndex=Array.IndexOf(args,"--language");string language=languageIndex>=0&&languageIndex+1<args.Length?args[languageIndex+1]:null;
-                    var panel=new Panel(demo,snapshot,smoke?Path.Combine(Path.GetTempPath(),"wtp-smoke-"+Guid.NewGuid().ToString("N")):null,language);app.MainWindow=panel.Window;
+                    var panel=new Panel(demo,snapshot,smoke?Path.Combine(Path.GetTempPath(),"wtp-smoke-"+Guid.NewGuid().ToString("N")):null,language);
                     var registration=ThreadPool.RegisterWaitForSingleObject(signal,delegate{app.Dispatcher.BeginInvoke(new Action(()=>panel.ShowFromLaunch()));},null,Timeout.Infinite,false);
                     if(smoke){int i=Array.IndexOf(args,"--smoke-test");if(i+1>=args.Length)throw new ArgumentException("--smoke-test requires a report path.");app.Dispatcher.BeginInvoke(new Action(async delegate{smokeExit=await panel.LiveSmoke(args[i+1])?0:1;}));}
                     else if(snapshot){int i=Array.IndexOf(args,"--snapshot");if(i+1>=args.Length)throw new ArgumentException("--snapshot requires a directory.");app.Dispatcher.BeginInvoke(new Action(()=>panel.CaptureAll(Path.GetFullPath(args[i+1]))));}
-                    else{if(!args.Contains("--background"))panel.ShowFromLaunch();else new System.Windows.Interop.WindowInteropHelper(panel.Window).EnsureHandle();panel.Start();}
+                    else{if(!args.Contains("--background"))panel.ShowFromLaunch();panel.Start();}
                     app.Run();registration.Unregister(null);return smokeExit;
                 }catch(Exception e){if(snapshot){File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"snapshot-error.log"),e.ToString());}else MessageBox.Show(e.Message,"What the Port could not start");return 1;}
             }

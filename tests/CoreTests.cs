@@ -95,6 +95,11 @@ public static class CoreTests {
                 int[] ports=Ready(first).Split(',').Select(Int32.Parse).ToArray();Ready(second);
                 Check("fixtures created independently",first.Id!=second.Id);
                 Check("same-user ownership verified",Native.IsOwned(first.Id));
+                DateTime sampledStart;double sampledCpu;long sampledMemory;
+                Check("query-only native sampling succeeds",Native.SampleProcess(first.Id,out sampledStart,out sampledCpu,out sampledMemory));
+                first.Refresh();
+                Check("native metrics agree with Framework for the owned fixture",sampledStart.Kind==DateTimeKind.Utc&&Native.SameStart(sampledStart,first.StartTime.ToUniversalTime())&&sampledMemory>=16*1024*1024&&Math.Abs(sampledMemory-first.WorkingSet64)<4*1024*1024&&Math.Abs(sampledCpu-first.TotalProcessorTime.TotalMilliseconds)<100);
+                Check("unavailable process cannot provide a valid sample",!Native.SampleProcess(0,out sampledStart,out sampledCpu,out sampledMemory)&&sampledMemory==0&&sampledCpu==0&&sampledStart==default(DateTime));
                 Check("cwd resolves without reading environment",String.Equals(Native.CurrentDirectory(first.Id).TrimEnd('\\'),temp.TrimEnd('\\'),StringComparison.OrdinalIgnoreCase));
                 var sockets=Native.Sockets();Check("native IPv4 listener detected",sockets.Any(s=>s.Pid==first.Id&&s.Port==ports[0]&&s.State==2));
                 Check("native IPv6 listener detected",sockets.Any(s=>s.Pid==first.Id&&s.Port==ports[1]&&s.State==2&&s.Address=="::1"));

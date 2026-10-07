@@ -13,6 +13,8 @@ namespace WhatThePort {
         [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
         [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
         [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetProcessTimes(IntPtr process, out long created, out long exited, out long kernel, out long user);
+        [DllImport("kernel32.dll")] static extern int GetCurrentProcessId();
+        [DllImport("psapi.dll", SetLastError=true)] static extern bool GetProcessMemoryInfo(IntPtr process,ref ProcessMemory memory,uint size);
         [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateProcess(IntPtr handle, uint code);
         [DllImport("kernel32.dll")] static extern bool ProcessIdToSessionId(int pid, out int session);
         [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
@@ -34,8 +36,29 @@ namespace WhatThePort {
         [StructLayout(LayoutKind.Sequential)] struct MemoryStatus {
             public uint Length, Load; public ulong Total, Available, PageTotal, PageAvailable, VirtualTotal, VirtualAvailable, Extended;
         }
-        static readonly string CurrentSid = WindowsIdentity.GetCurrent().User.Value;
-        static readonly int CurrentSession = Process.GetCurrentProcess().SessionId;
+        [StructLayout(LayoutKind.Sequential)] struct ProcessMemory {
+            public uint Size,PageFaults;
+            public UIntPtr PeakWorkingSet,WorkingSet,PeakPagedPool,PagedPool,PeakNonPagedPool,NonPagedPool,Pagefile,PeakPagefile,PrivateUsage;
+        }
+        static readonly string CurrentSid = ReadCurrentSid();
+        static readonly int CurrentSession = ReadCurrentSession();
+        static string ReadCurrentSid(){using(var identity=WindowsIdentity.GetCurrent())return identity.User.Value;}
+        static int ReadCurrentSession(){int session;if(!ProcessIdToSessionId(GetCurrentProcessId(),out session))throw new Win32Exception();return session;}
+
+        // Read metrics from one query-only handle. Process.WorkingSet64 builds
+        // system-wide process information for every sampled process on Framework.
+        public static bool SampleProcess(int pid,out DateTime started,out double cpuMilliseconds,out long workingSet) {
+            started=default(DateTime);cpuMilliseconds=0;workingSet=0;
+            IntPtr process=OpenProcess(0x1000,false,pid);if(process==IntPtr.Zero)return false;
+            try {
+                long created,exited,kernel,user;
+                if(!OwnedByCurrentUser(process,pid)||!GetProcessTimes(process,out created,out exited,out kernel,out user))return false;
+                var memory=new ProcessMemory{Size=(uint)Marshal.SizeOf(typeof(ProcessMemory))};
+                if(!GetProcessMemoryInfo(process,ref memory,memory.Size))return false;
+                started=DateTime.FromFileTimeUtc(created);cpuMilliseconds=((double)kernel+user)/TimeSpan.TicksPerMillisecond;workingSet=(long)memory.WorkingSet.ToUInt64();
+                return true;
+            } finally {CloseHandle(process);}
+        }
 
         public static Dictionary<int, ProcessNode> Processes() {
             var result = new Dictionary<int, ProcessNode>();

@@ -25,14 +25,14 @@ namespace WhatThePort {
                     ProcessNode value;
                     if (!sampled.TryGetValue(node.Pid, out value)) {
                         try {
-                            using (var p=Process.GetProcessById(node.Pid)) {
-                                var start=p.StartTime.ToUniversalTime(); double cpuTime=p.TotalProcessorTime.TotalMilliseconds; double cpu=0;
-                                Previous old;
-                                if (previous.TryGetValue(node.Pid,out old) && Native.SameStart(start,old.Start) && now > old.At) cpu=Math.Max(0, Math.Min(100, (cpuTime-old.Cpu)/(now-old.At).TotalMilliseconds/Environment.ProcessorCount*100));
-                                previous[node.Pid]=new Previous { Start=start, At=now, Cpu=cpuTime };
-                                value=new ProcessNode { Pid=node.Pid, Parent=node.Parent, Name=node.Name, Started=start, Memory=p.WorkingSet64, Cpu=cpu, Depth=node.Depth };
-                                sampled[node.Pid]=value;
-                            }
+                            DateTime start;double cpuTime;long memory;
+                            if(!Native.SampleProcess(node.Pid,out start,out cpuTime,out memory))continue;
+                            double cpu=0;
+                            Previous old;
+                            if (previous.TryGetValue(node.Pid,out old) && Native.SameStart(start,old.Start) && now > old.At) cpu=Math.Max(0, Math.Min(100, (cpuTime-old.Cpu)/(now-old.At).TotalMilliseconds/Environment.ProcessorCount*100));
+                            previous[node.Pid]=new Previous { Start=start, At=now, Cpu=cpuTime };
+                            value=new ProcessNode { Pid=node.Pid, Parent=node.Parent, Name=node.Name, Started=start, Memory=memory, Cpu=cpu, Depth=node.Depth };
+                            sampled[node.Pid]=value;
                         } catch { continue; }
                     }
                     if(measured.Count>0&&value.Started<measured[0].Started)continue;

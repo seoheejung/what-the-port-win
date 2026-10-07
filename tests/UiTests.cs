@@ -1,11 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using WhatThePort.App;
 
@@ -24,6 +29,7 @@ public static class UiTests {
             double bottom=bounds.Bottom;
             // Exercise actual WPF templates invisibly; every operation uses isolated demo data.
             Layout();Check("list starts with five servers",Rows().Count()==5);
+            HeaderTests();
             KeyboardTests();
             CheckNames("list controls have screen reader names");
             Click(Rows().First());Check("row opens server detail",Title()=="menubar port monitor");
@@ -45,7 +51,7 @@ public static class UiTests {
             CheckPlacement("cleanup preserves bottom and footer",bottom);
             var checks=All(Body()).OfType<CheckBox>().ToList();Check("idle cleanup candidates preselected",checks.Count(c=>c.IsChecked==true)==2);
             var first=checks.First();first.IsChecked=true;Click(first);Check("cleanup selection updates stop count",ByName("Stop selected server process trees").Content.ToString().StartsWith("Stop 3 servers"));
-            Click(ByName("Stop selected server process trees"));Check("demo cleanup removes only selection",Title()=="Servers"&&Rows().Count()==2&&Message().Contains("No processes"));
+            Click(ByName("Stop selected server process trees"));Check("demo cleanup removes only selection",Title()=="What the Port"&&Rows().Count()==2&&Message().Contains("No processes"));
             Click(ByName("Settings (Ctrl+,)"));Check("settings view opens",Title()=="Settings");
             CheckNames("settings controls have screen reader names");
             CheckPlacement("settings fit work area with visible save button",bottom);
@@ -53,7 +59,7 @@ public static class UiTests {
             Check("long settings content scrolls within panel",scroll.ScrollableHeight>0);
             var sample=All(Body()).OfType<TextBox>().First();sample.Text="0";Click(ByName("Save preferences"));Check("invalid preferences stay on settings",Title()=="Settings"&&Message().Contains("thresholds"));
             var notice=(TextBlock)window.FindName("Message");Check("error text exposed as screen reader live region",AutomationProperties.GetLiveSetting(notice)==AutomationLiveSetting.Polite&&UIElementAutomationPeer.CreatePeerForElement(notice).GetName().Contains("thresholds"));
-            sample.Text="5";Click(ByName("Save preferences"));Check("valid preferences applied",Title()=="Servers"&&((TextBlock)window.FindName("Status")).Text.Contains("DEMO"));
+            sample.Text="5";Click(ByName("Save preferences"));Check("valid preferences applied",Title()=="What the Port"&&((TextBlock)window.FindName("Status")).Text.Contains("DEMO"));
             CheckPlacement("return to list preserves bottom",bottom);
             Click(ByName("Select servers to stop (C)"));foreach(var check in All(Body()).OfType<CheckBox>().ToList()){if(check.IsChecked!=true){check.IsChecked=true;Click(check);}}
             // Every click re-renders the view, so select remaining current controls by iteration.
@@ -63,9 +69,65 @@ public static class UiTests {
             Check("pin state has a meaningful accessible name",UIElementAutomationPeer.CreatePeerForElement(pin).GetName()=="Unpin panel");
             LocalizationTests();
             LaunchVisibilityTests();
+            TrayLifetimeTests();
         }catch(Exception e){failed++;Console.WriteLine("FAIL UI exception: "+e);}
         finally{if(panel!=null)panel.Quit();else app.Shutdown();}
         Console.WriteLine("\n"+passed+" UI passed, "+failed+" failed");return failed==0?0:1;
+    }
+    const BindingFlags PrivateInstance=BindingFlags.NonPublic|BindingFlags.Instance;
+    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr owner,int message,IntPtr wparam,IntPtr lparam);
+    [DllImport("user32.dll")] static extern bool PostMessage(IntPtr owner,int message,IntPtr wparam,IntPtr lparam);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int RegisterWindowMessage(string name);
+    [DllImport("user32.dll")] static extern bool IsWindow(IntPtr handle);
+    static object Field(string name){return typeof(WhatThePort.App.Panel).GetField(name,PrivateInstance).GetValue(panel);}
+    static void Invoke(string name,params object[] args){typeof(WhatThePort.App.Panel).GetMethod(name,PrivateInstance).Invoke(panel,args);}
+    static void TrayEvent(IntPtr owner,int code){SendMessage(owner,0x8002,IntPtr.Zero,new IntPtr((1<<16)|code));Pump();}
+    static void TrayLifetimeTests(){
+        // Replace the demo panel with isolated real preferences; never execute server actions.
+        typeof(WhatThePort.App.Panel).GetField("closing",PrivateInstance).SetValue(panel,true);
+        ((TrayIcon)Field("tray")).Dispose();((HwndSource)Field("notificationWindow")).Dispose();window.Close();
+        string storage=Path.Combine(Path.GetTempPath(),"wtp-ui-"+Guid.NewGuid().ToString("N"));
+        try{
+            new WhatThePort.Store(storage).SaveSettings(new WhatThePort.Settings{Notifications=false,Cleanup="Off"});
+            panel=new WhatThePort.App.Panel(false,false,storage,"en");window=null;
+            var tray=(TrayIcon)Field("tray");var owner=(IntPtr)Field("handle");
+            Check("background startup creates tray without a WPF panel",panel.Window==null&&tray.Visible&&IsWindow(owner));
+            SendMessage(owner,0x8002,IntPtr.Zero,new IntPtr((2<<16)|0x400));
+            Check("unrelated tray icon callbacks are ignored",panel.Window==null);
+            SendMessage(owner,0x8002,IntPtr.Zero,new IntPtr((1<<16)|0x400));window=panel.Window;window.Opacity=0;Layout();
+            Check("native tray click opens the deferred panel",panel.IsVisible&&Title()=="What the Port");
+            Click((Button)window.FindName("Pin"));
+            typeof(WhatThePort.App.Panel).GetField("current",PrivateInstance).SetValue(panel,Demo.Create());Rerender();
+            Click(Rows().First());var chart=All(Body()).OfType<Chart>().First();chart.Focus();Press(Key.Home);var selectedTime=chart.SelectedTime;
+            string detailTitle=Title();TrayEvent(owner,0x401);
+            Check("native tray keyboard activation hides panel and releases chart controls",!panel.IsVisible&&Body().Children.Count==0);
+            Invoke("SuspendWindow");Check("idle release closes only the panel and retains the tray",panel.Window==null&&tray.Visible&&IsWindow(owner));
+            TrayEvent(owner,0x400);window=panel.Window;window.Opacity=0;Layout();
+            Check("reopening restores detail and pin state",Title()==detailTitle&&((Button)window.FindName("Pin")).Content.ToString()=="◆");
+            Check("reopening restores chart selection",All(Body()).OfType<Chart>().First().SelectedTime==selectedTime);
+            for(int i=0;i<3;i++){
+                window.Hide();Invoke("SuspendWindow");SendMessage(owner,0x0312,new IntPtr(1),IntPtr.Zero);window=panel.Window;window.Opacity=0;Layout();
+                Check("hotkey reopens released panel "+(i+1),panel.IsVisible&&Title()==detailTitle&&tray.Visible);
+            }
+            Click((Button)window.FindName("Back"));Click(ByName("Settings (Ctrl+,)"));
+            var input=All(Body()).OfType<TextBox>().First();input.Text="17";window.Hide();Invoke("SuspendWindow");
+            Check("idle release preserves unsaved settings",panel.Window==window&&input.Text=="17");
+            TrayEvent(owner,0x405);Check("notification click reveals unsaved settings",panel.IsVisible&&Title()=="Settings"&&input.Text=="17");
+            Click((Button)window.FindName("Back"));Click(Rows().First());Click(ByName("Manage project links and copy local URL"));
+            input=All(Body()).OfType<TextBox>().First();input.Text="unsaved-link";window.Hide();Invoke("SuspendWindow");
+            Check("idle release preserves unsaved project links",panel.Window==window&&input.Text=="unsaved-link");
+            panel.ShowFromLaunch();Layout();Click((Button)window.FindName("Back"));window.Hide();Invoke("SuspendWindow");
+            SendMessage(owner,RegisterWindowMessage("TaskbarCreated"),IntPtr.Zero,IntPtr.Zero);
+            Check("tray survives Explorer recovery notification while UI is released",tray.Visible&&panel.Window==null);
+            // Dismiss only this test-owned popup; never synthesize global mouse/keyboard input.
+            using(var dismiss=new System.Threading.Timer(delegate{PostMessage(owner,0x001F,IntPtr.Zero,IntPtr.Zero);},null,250,250)){
+                SendMessage(owner,0x8002,new IntPtr(-1),new IntPtr((1<<16)|0x7B));
+            }
+            Check("native tray context menu opens and dismisses without creating panel",tray.Visible&&panel.Window==null);
+            panel.ShowFromLaunch();window=panel.Window;window.Opacity=0;Layout();
+            Check("explicit activation still works after release",panel.IsVisible);
+            tray.Dispose();tray.Dispose();Check("tray disposal is idempotent",!tray.Visible);
+        }finally{if(Directory.Exists(storage))Directory.Delete(storage,true);}
     }
     static void LaunchVisibilityTests(){
         // Use a normal demo panel: snapshot panels intentionally suppress auto-hide.
@@ -79,6 +141,16 @@ public static class UiTests {
         panel.ShowFromLaunch();Layout();Click((Button)window.FindName("Hide"));Check("explicit close still hides a newly launched panel",!window.IsVisible);
         panel.ShowFromLaunch();Layout();((Button)window.FindName("Back")).Focus();Press(Key.Escape);Check("Escape still hides a newly launched panel",!window.IsVisible);
         panel.Show();Layout();deactivate.Invoke(panel,new object[]{window,EventArgs.Empty});Check("ordinary tray or hotkey opening retains auto-hide",!window.IsVisible);
+    }
+    static void HeaderTests(){
+        var heading=(TextBlock)window.FindName("Title");string original=heading.Text;
+        Check("home heading identifies the app",original=="What the Port"&&window.Title==original);
+        foreach(string text in new[]{"What the Port","설정","An exceptionally long project name for the server detail"}){
+            heading.Text=text;Layout();var at=heading.TranslatePoint(new Point(),window);
+            var back=(Button)window.FindName("Back");var pin=(Button)window.FindName("Pin");
+            Check("header stays centered without overlapping controls: "+text,Near(at.X+heading.ActualWidth/2,window.ActualWidth/2)&&heading.TextAlignment==TextAlignment.Center&&at.X>=back.TranslatePoint(new Point(back.ActualWidth,0),window).X&&at.X+heading.ActualWidth<=pin.TranslatePoint(new Point(),window).X);
+        }
+        heading.Text=original;Layout();
     }
     static void LocalizationTests(){
         var snapshot=WhatThePort.App.Demo.Create();snapshot.Servers[0].Name="Settings";snapshot.Servers[0].Protected=true;snapshot.Servers[0].ProtectionReason="This app or a parent process. Stopping it could close your working session.";
@@ -94,7 +166,7 @@ public static class UiTests {
         Press(Key.Escape);Click(ByName("Settings (Ctrl+,)"));
         All(Body()).OfType<ComboBox>().Single(c=>(string)c.Tag=="select-LANGUAGE / 언어").SelectedItem="한국어";
         Click(ByName("Save preferences"));
-        Check("language save immediately translates header and feedback",Title()=="서버"&&Message().Contains("설정"));
+        Check("language save immediately translates header and feedback",Title()=="What the Port"&&Message().Contains("설정"));
         Check("project names are never translated",All(Body()).OfType<TextBlock>().Any(t=>t.Text=="Settings"));
         Check("Korean accessibility names include header and settings",AutomationProperties.GetName((Button)window.FindName("Back"))=="서버 목록"&&ByName("설정 (Ctrl+,)")!=null);
         Click(Rows().First());var chart=All(Body()).OfType<Chart>().First();
@@ -105,7 +177,7 @@ public static class UiTests {
         var sample=All(Body()).OfType<TextBox>().First();sample.Text="bad";Click(ByName("설정 저장"));Check("invalid numeric input has Korean feedback",Message().Contains("올바른 숫자"));sample.Text="3";
         var modes=All(Body()).OfType<ComboBox>().Single(c=>(string)c.Tag=="select-AUTOMATIC CLEAN UP");Check("cleanup options are localized",modes.Items.Cast<string>().SequenceEqual(new[]{"끄기","알림 후 직접 선택","자동 종료"}));
         All(Body()).OfType<ComboBox>().Single(c=>(string)c.Tag=="select-LANGUAGE / 언어").SelectedItem="English";
-        Click(ByName("설정 저장"));Check("English can be restored without restart",Title()=="Servers"&&ByName("Settings (Ctrl+,)")!=null);
+        Click(ByName("설정 저장"));Check("English can be restored without restart",Title()=="What the Port"&&ByName("Settings (Ctrl+,)")!=null);
         var strings=new Strings("ko");var outcome=new WhatThePort.StopResult{Port=3000,ListenerStopped=true,Stopped=1};outcome.Errors.Add("Access denied");
         Check("partial stop feedback cannot claim total failure or total success",strings.StopSummary(outcome).Contains("일부 종료")&&strings.StopSummary(outcome).Contains("서버 본체 종료")&&strings.StopSummary(outcome).Contains("오류 1건"));
         foreach(var s in snapshot.Servers)s.Protected=true;Rerender();Click(ByName("Select servers to stop (C)"));
@@ -146,7 +218,7 @@ public static class UiTests {
         var action=ByName("Open local server (O)");action.Focus();Rerender();
         Check("live refresh preserves footer button focus",ByName("Open local server (O)").IsKeyboardFocused);
         Press(Key.Enter);Check("keyboard activates action with feedback",Message().Contains("simulated"));
-        Press(Key.Escape);Check("Escape returns to focused server row",Title()=="Servers"&&Rows().First().IsKeyboardFocused);
+        Press(Key.Escape);Check("Escape returns to focused server row",Title()=="What the Port"&&Rows().First().IsKeyboardFocused);
         var pin=(Button)window.FindName("Pin");pin.Focus();
         var visited=new HashSet<DependencyObject>();
         for(int i=0;i<30;i++){var focused=Keyboard.FocusedElement as UIElement;if(focused==null)break;visited.Add(focused);focused.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));}
