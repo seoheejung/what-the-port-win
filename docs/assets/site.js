@@ -2,6 +2,12 @@
 document.documentElement.classList.add('js');
 const menuButton = document.querySelector('.menu-toggle');
 const menu = document.querySelector('#main-nav');
+const header = document.querySelector('.site-header');
+if (header) {
+  const sizeHeader = () => document.documentElement.style.setProperty('--header-height', `${Math.ceil(header.getBoundingClientRect().height)}px`);
+  new ResizeObserver(sizeHeader).observe(header);
+  sizeHeader();
+}
 function closeMenu(returnFocus = false) {
   if (!menuButton || !menu) return;
   menu.classList.remove('is-open');
@@ -20,6 +26,7 @@ document.addEventListener('keydown', event => {
 document.addEventListener('click', event => {
   if (menu && !menu.contains(event.target) && !menuButton.contains(event.target)) closeMenu();
 });
+window.matchMedia('(min-width:681px)').addEventListener('change', () => closeMenu());
 const tabs = [...document.querySelectorAll('[role="tab"]')];
 function selectTab(tab, focus = false) {
   for (const item of tabs) {
@@ -45,5 +52,28 @@ tabs.forEach((tab, index) => {
 if (tabs.length) selectTab(tabs[0]);
 const status = document.getElementById('site-status');
 document.querySelectorAll('a[download]').forEach(link => link.addEventListener('click', () => {
-  if (status) status.textContent = 'Windows ZIP 다운로드 링크를 열었습니다. 브라우저의 다운로드 목록을 확인하세요.';
+  if (status) status.textContent = '다운로드 링크를 열었습니다. 브라우저의 다운로드 목록을 확인하세요.';
 }));
+
+// Keep screenshot links useful without JavaScript; with it, view full-size images in place.
+const imageLinks = [...document.querySelectorAll('[data-lightbox]')];
+if (imageLinks.length) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'lightbox';
+  dialog.setAttribute('aria-label', '앱 화면 크게 보기');
+  dialog.innerHTML = '<div class="lightbox-bar"><p>실제 앱 화면 · 데모 데이터</p><button class="lightbox-close" type="button" autofocus>닫기 ×</button></div><div class="lightbox-scroll" tabindex="0" role="region" aria-label="앱 화면 이미지"><img alt=""></div><p class="lightbox-hint">이미지를 스크롤해 살펴보세요. Esc로 닫을 수 있습니다.</p>';
+  document.body.append(dialog);
+  let opener;
+  const closeButton = dialog.querySelector('button');
+  closeButton.addEventListener('click', () => dialog.close());
+  dialog.addEventListener('close', () => opener?.focus());
+  dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+  for (const link of imageLinks) link.addEventListener('click', event => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();opener = link;
+    const image = dialog.querySelector('img');
+    image.src = link.href;image.alt = link.querySelector('img').alt;
+    dialog.showModal();closeButton.focus();
+    dialog.querySelector('.lightbox-scroll').scrollTo(0, 0);
+  });
+}
