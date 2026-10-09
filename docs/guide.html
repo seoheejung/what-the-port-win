@@ -7,8 +7,8 @@
   <meta name="description" content="최신 앱 화면으로 따라가는 What the Port Windows 사용 가이드. 실행 파일, 창 표시·숨김, 서버 조회, 언어 미리보기, 프로젝트 연결과 정리 방법.">
   <meta name="theme-color" content="#10141c">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="assets/site.css">
-  <script src="assets/site.js" defer></script>
+  <link rel="stylesheet" href="assets/site.css?v=20261010-nav">
+  <script src="assets/site.js?v=20261010-nav" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">본문으로 건너뛰기</a>
@@ -108,13 +108,32 @@
         </section>
         <section class="guide-chapter" id="cli" aria-labelledby="cli-title">
           <p class="chapter-number">08 / COMMAND LINE</p><h2 id="cli-title">터미널에서도 같은 목록.</h2>
-          <p>압축을 푼 폴더에서 PowerShell을 열고 실행하세요.</p>
+          <p>압축을 푼 폴더에서 터미널을 열고 아래 명령을 하나씩 실행하세요. <strong>서버 목록을 보는 데 프로젝트 연결 등록은 필요하지 않습니다.</strong> 조회 명령은 PowerShell과 명령 프롬프트(CMD) 모두에서 사용할 수 있습니다.</p>
           <pre tabindex="0" aria-label="서버 조회 명령"><code>.\wtp.exe list
 .\wtp.exe list --json
 .\wtp.exe list --all</code></pre>
-          <p>프로젝트 링크를 명령으로 등록할 수도 있습니다.</p>
-          <pre tabindex="0" aria-label="프로젝트 연결 등록 명령"><code>.\wtp.exe link --port 3000 --folder C:\dev\my-app --agent codex --session YOUR_SESSION_ID</code></pre>
-          <p><code>YOUR_SESSION_ID</code>는 실제 ID로 교체하세요. 같은 폴더·포트의 링크 레코드는 교체되므로, 세션과 미리보기를 유지하려면 같은 명령에 두 항목을 함께 입력해야 합니다.</p>
+          <h3>프로젝트 연결은 필요할 때만.</h3>
+          <p><code>link</code>는 에이전트 세션·Vercel 미리보기 정보를 저장합니다. 개발 서버를 실행하거나 목록에 추가하는 명령은 아닙니다. 처음에는 앱에서 <strong>서버 선택 → 프로젝트 연결</strong>을 여는 것이 편합니다. <a href="#links">입력란별 설명 보기</a>.</p>
+          <div class="note-card"><p><strong>다운로드 폴더와 프로젝트 폴더는 다릅니다.</strong> <code>WhatThePort-Windows-x64</code>는 이 도구가 들어 있는 폴더입니다. 연결할 프로젝트 폴더는 개발 서버를 실행한 소스 코드 폴더이며, 앱의 서버 상세에 표시되는 <strong>폴더</strong> 경로를 확인하세요.</p></div>
+          <table><caption class="sr-only">연결 명령에 입력할 실제 값</caption><thead><tr><th scope="col">항목</th><th scope="col">입력할 값</th></tr></thead><tbody><tr><td><code>--port</code></td><td>서버 목록에서 확인한 실제 포트. 3000은 예시입니다.</td></tr><tr><td><code>--folder</code></td><td>실제로 존재하는 프로젝트 폴더의 전체 경로. 직접 명령에 적을 때는 공백을 포함한 경로를 큰따옴표로 감싸세요.</td></tr><tr><td><code>--session</code></td><td>재개할 실제 세션 ID. 모르면 생략하세요. <code>YOUR_SESSION_ID</code>는 안내용 표시이며 실제 ID가 아닙니다.</td></tr><tr><td><code>--preview</code></td><td>직접 등록할 실제 Vercel HTTPS 주소. 사용하지 않으면 생략하세요.</td></tr></tbody></table>
+          <details><summary>고급: PowerShell에서 값을 입력하며 연결 등록하기</summary>
+            <p>아래 코드는 실행 중에 본인의 값을 묻습니다. <strong>같은 폴더·포트의 기존 연결을 교체합니다.</strong> 유지할 세션과 미리보기가 있다면 둘 다 입력하세요. 빈칸으로 두는 항목은 저장된 연결에서도 비워집니다.</p>
+            <p><code>C:\…&gt;</code>는 보통 CMD, <code>PS C:\…&gt;</code>는 PowerShell입니다. CMD를 사용 중이면 먼저 <code>powershell -NoProfile</code>을 실행하세요. 현재 폴더는 압축을 푼 폴더로 유지합니다.</p>
+            <pre tabindex="0" aria-label="PowerShell 대화형 프로젝트 연결 등록"><code>&amp; {
+    $projectFolder = Join-Path (Read-Host '서버 상세에 표시된 프로젝트 폴더 전체 경로 (따옴표 없이)') '.' -ErrorAction Stop
+    $serverPort = Read-Host '서버 목록에서 확인한 포트 번호'
+    $sessionId = Read-Host '실제 세션 ID (사용하지 않으면 Enter)'
+    $previewUrl = Read-Host '실제 Vercel HTTPS 주소 (사용하지 않으면 Enter)'
+    $linkArgs = @('link', '--port', $serverPort, '--folder', $projectFolder)
+    if ($sessionId) {
+        $agent = Read-Host '에이전트: codex 또는 claude'
+        $linkArgs += @('--agent', $agent, '--session', $sessionId)
+    }
+    if ($previewUrl) { $linkArgs += @('--preview', $previewUrl) }
+    .\wtp.exe @linkArgs
+}</code></pre>
+          </details>
+          <details><summary>Choose an existing absolute project folder. 오류가 나요.</summary><p>입력한 프로젝트 폴더가 존재하지 않는다는 뜻입니다. 이전 예시의 <code>C:\dev\my-app</code>을 그대로 입력하면 해당 폴더가 없는 PC에서 이 오류가 납니다. 예시 폴더를 새로 만들지 말고, 앱의 서버 상세에서 실제 프로젝트 폴더를 확인해 입력하세요. 포트와 세션 ID도 본인의 값이어야 합니다. 이 오류로 실패한 명령은 연결을 저장하지 않습니다.</p></details>
         </section>
         <section class="guide-chapter" id="help" aria-labelledby="help-title">
           <p class="chapter-number">09 / A LITTLE HELP</p><h2 id="help-title">여기서 막혔다면.</h2>

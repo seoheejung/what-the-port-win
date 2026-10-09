@@ -43,6 +43,32 @@ for(const width of [1440,1024,768,430,390,360,320])for(const route of ['/','/gui
     await captureViewport(`${page}-${width}-top`);
   }
 }
+for (const width of [1440,390]) {
+  await navigate('/',width,900);
+  check('hero has no falsely selected navigation at '+width,await evaluate('!document.querySelector("#main-nav [aria-current]")'));
+  for (const id of ['preview','features','download','features','preview']) {
+    await evaluate(`window.scrollTo({top:document.getElementById('${id}').getBoundingClientRect().top+scrollY-document.querySelector('.site-header').offsetHeight-24,behavior:'instant'})`);
+    await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+    check('scroll follows '+id+' at '+width,await evaluate(`document.querySelectorAll('#main-nav [aria-current]').length===1 && document.querySelector('#main-nav [aria-current]')?.hash==='#${id}'`));
+    check('scroll keeps URL and focus at '+width,await evaluate('location.hash === "" && document.activeElement.tagName === "BODY"'));
+  }
+  if(width===1440)await captureViewport('home-current-section-desktop');
+  if(width===390){
+    await evaluate('document.querySelector(".menu-toggle").click()');
+    await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+    check('mobile menu exposes current section',await evaluate('document.querySelector("#main-nav").classList.contains("is-open") && document.querySelector("#main-nav [aria-current]")?.hash==="#preview"'));
+    await captureViewport('home-current-section-mobile');
+    await evaluate('document.querySelector("#main-nav a[href=\\"#download\\"]").click()');
+    await evaluate('new Promise(resolve=>setTimeout(resolve,150))');
+    check('mobile anchor closes menu and updates current section',await evaluate('!document.querySelector("#main-nav").classList.contains("is-open") && document.querySelector("#main-nav [aria-current]")?.hash==="#download" && document.getElementById("download").getBoundingClientRect().top>=document.querySelector(".site-header").getBoundingClientRect().bottom'));
+  }
+  await evaluate('window.scrollTo({top:0,behavior:"instant"})');
+  await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+  check('returning to hero clears selected navigation at '+width,await evaluate('!document.querySelector("#main-nav [aria-current]")'));
+}
+await navigate('/#features',1440,900);
+await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+check('direct anchor URL selects matching navigation',await evaluate('document.querySelector("#main-nav [aria-current]")?.hash==="#features"'));
 await navigate('/',390,844);
 await key('Tab','Tab',9);check('first keyboard stop is skip link',await evaluate('document.activeElement.classList.contains("skip-link")'));
 await key('Enter','Enter',13);check('skip link moves to main',await evaluate('document.activeElement.id === "main"'));
@@ -56,10 +82,12 @@ await key('End','End',35);check('End selects last preview tab',await evaluate('d
 const tree=await call('Accessibility.getFullAXTree');
 check('screen reader tree exposes menu and screenshot text',tree.nodes.some(n=>n.role?.value==='button'&&n.name?.value.includes('메뉴'))&&tree.nodes.some(n=>n.role?.value==='image'&&n.name?.value.includes('설정 화면')));
 await navigate('/guide.html',390,844);
+check('guide keeps its page navigation selected',await evaluate('document.querySelector("#main-nav [aria-current=page]")?.getAttribute("href")==="guide.html"'));
 await evaluate('document.querySelector(".guide-toc a[href$=links]").click()');
 await new Promise(r=>setTimeout(r,650));
 check('guide anchors clear the sticky header',await evaluate('document.getElementById("links").getBoundingClientRect().top >= document.querySelector(".site-header").getBoundingClientRect().bottom'));
 await captureViewport('guide-links-mobile');
+check('guide selection survives scrolling',await evaluate('document.querySelector("#main-nav [aria-current=page]")?.getAttribute("href")==="guide.html"'));
 await evaluate('document.querySelector("#links [data-lightbox]").focus()');await key('Enter','Enter',13);
 check('mobile screenshot opens at full size with contained horizontal scrolling',await evaluate('document.querySelector("dialog").open && document.activeElement.classList.contains("lightbox-close") && document.documentElement.scrollWidth<=innerWidth'));
 await evaluate('document.querySelector("dialog img").decode()');

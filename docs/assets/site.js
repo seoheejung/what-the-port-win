@@ -3,8 +3,10 @@ document.documentElement.classList.add('js');
 const menuButton = document.querySelector('.menu-toggle');
 const menu = document.querySelector('#main-nav');
 const header = document.querySelector('.site-header');
+function sizeHeader() {
+  if (header) document.documentElement.style.setProperty('--header-height', `${Math.ceil(header.getBoundingClientRect().height)}px`);
+}
 if (header) {
-  const sizeHeader = () => document.documentElement.style.setProperty('--header-height', `${Math.ceil(header.getBoundingClientRect().height)}px`);
   new ResizeObserver(sizeHeader).observe(header);
   sizeHeader();
 }
@@ -12,6 +14,8 @@ function closeMenu(returnFocus = false) {
   if (!menuButton || !menu) return;
   menu.classList.remove('is-open');
   menuButton.setAttribute('aria-expanded', 'false');
+  // Apply the collapsed height before a clicked anchor calculates its scroll offset.
+  sizeHeader();
   if (returnFocus) menuButton.focus();
 }
 menuButton?.addEventListener('click', () => {
@@ -27,6 +31,43 @@ document.addEventListener('click', event => {
   if (menu && !menu.contains(event.target) && !menuButton.contains(event.target)) closeMenu();
 });
 window.matchMedia('(min-width:681px)').addEventListener('change', () => closeMenu());
+
+// Follow the visible section without changing the URL, history or keyboard focus.
+const sectionLinks = [...(menu?.querySelectorAll('a[href^="#"]') || [])]
+  .map(link => ({link, section: document.getElementById(link.hash.slice(1))}))
+  .filter(item => item.section);
+if (sectionLinks.length) {
+  let framePending = false;
+  function updateSection() {
+    framePending = false;
+    const readingLine = (header?.getBoundingClientRect().bottom || 0) + 32;
+    let active = null;
+    let nearestTop = -Infinity;
+    // Navigation order need not match the order of sections on the page.
+    for (const item of sectionLinks) {
+      const top = item.section.getBoundingClientRect().top;
+      if (top <= readingLine && top > nearestTop) { active = item; nearestTop = top; }
+    }
+    for (const item of sectionLinks) {
+      if (item === active) {
+        if (item.link.getAttribute('aria-current') !== 'location') item.link.setAttribute('aria-current', 'location');
+      } else item.link.removeAttribute('aria-current');
+    }
+  }
+  function scheduleSectionUpdate() {
+    if (framePending) return;
+    framePending = true;
+    requestAnimationFrame(updateSection);
+  }
+  window.addEventListener('scroll', scheduleSectionUpdate, {passive: true});
+  window.addEventListener('resize', scheduleSectionUpdate);
+  window.addEventListener('hashchange', scheduleSectionUpdate);
+  window.addEventListener('pageshow', scheduleSectionUpdate);
+  const sectionResize = new ResizeObserver(scheduleSectionUpdate);
+  if (header) sectionResize.observe(header);
+  sectionResize.observe(document.querySelector('main'));
+  scheduleSectionUpdate();
+}
 const tabs = [...document.querySelectorAll('[role="tab"]')];
 function selectTab(tab, focus = false) {
   for (const item of tabs) {

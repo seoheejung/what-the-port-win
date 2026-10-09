@@ -47,12 +47,42 @@
 
 ### CLI 링크 등록
 
+서버 조회에는 링크 등록이 필요하지 않다. 압축을 푼 앱 폴더에서 아래 명령을 하나씩 실행한다. PowerShell과 명령 프롬프트(CMD) 모두 지원한다. 소스에서 빌드했다면 `dist` 폴더에서 실행한다.
+
 ```powershell
-.\dist\wtp.exe link --port 3000 --folder C:\dev\my-app --agent codex --session YOUR_SESSION_ID
-.\dist\wtp.exe link --port 5173 --folder C:\dev\other-app --agent claude --session YOUR_SESSION_ID --preview https://my-preview.vercel.app
+.\wtp.exe list
+.\wtp.exe list --json
+.\wtp.exe list --all
 ```
 
-`wtp link` 실행 시 해당 폴더·포트의 링크 레코드 교체. 세션과 미리보기 동시 유지 시 같은 명령에 두 항목 모두 입력.
+`wtp link`는 세션·미리보기 정보를 저장하는 선택 기능이다. 서버를 실행하거나 목록에 추가하지 않는다. 앱의 **서버 상세 → 프로젝트 연결**에서도 같은 내용을 등록할 수 있다.
+
+- `--folder`: 개발 서버를 실행한 실제 프로젝트 폴더의 전체 경로. 앱의 서버 상세 **폴더**에서 확인한다. ZIP을 압축 해제한 `WhatThePort-Windows-x64` 폴더와 다르다. 직접 명령에 적는 경로는 공백을 고려해 큰따옴표로 감싼다.
+- `--port`: 서버 목록의 실제 포트. 3000은 예시다.
+- `--session`: 실제 세션 ID. `YOUR_SESSION_ID`는 안내용 표시이며 그대로 입력하지 않는다. 사용하지 않으면 생략한다.
+- `--preview`: 실제 Vercel HTTPS 주소. 사용하지 않으면 생략한다.
+
+아래는 **PowerShell 전용**으로 실제 값을 물어보는 등록 명령이다. `C:\…>` 형태의 CMD를 사용 중이면 먼저 `powershell -NoProfile`을 실행한다. 앱 폴더에서 실행하되, 입력할 프로젝트 경로는 서버 상세에서 확인한다.
+
+**같은 폴더·포트의 기존 연결을 교체한다. 유지할 세션과 미리보기가 있다면 둘 다 입력한다. 빈칸인 항목은 저장된 연결에서도 비워진다.**
+
+```powershell
+& {
+    $projectFolder = Join-Path (Read-Host '서버 상세에 표시된 프로젝트 폴더 전체 경로 (따옴표 없이)') '.' -ErrorAction Stop
+    $serverPort = Read-Host '서버 목록에서 확인한 포트 번호'
+    $sessionId = Read-Host '실제 세션 ID (사용하지 않으면 Enter)'
+    $previewUrl = Read-Host '실제 Vercel HTTPS 주소 (사용하지 않으면 Enter)'
+    $linkArgs = @('link', '--port', $serverPort, '--folder', $projectFolder)
+    if ($sessionId) {
+        $agent = Read-Host '에이전트: codex 또는 claude'
+        $linkArgs += @('--agent', $agent, '--session', $sessionId)
+    }
+    if ($previewUrl) { $linkArgs += @('--preview', $previewUrl) }
+    .\wtp.exe @linkArgs
+}
+```
+
+`Choose an existing absolute project folder.`는 입력한 프로젝트 폴더가 없다는 뜻이다. 이전 예시 경로 `C:\dev\my-app`을 그대로 쓰지 말고 실제 프로젝트 경로를 입력한다. 오류를 없애려고 예시 폴더를 새로 만들 필요는 없다. 이 오류로 실패한 명령은 연결을 저장하지 않는다.
 
 Vercel API 인증·배포 없음. 등록된 HTTPS 주소의 브라우저 열기만 지원. PowerShell·Windows Terminal 외의 사용자 지정 터미널 명령 미지원.
 

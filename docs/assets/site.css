@@ -17,7 +17,8 @@
 html{scroll-padding-top:calc(var(--header-height) + 24px)}
 .site-header{position:sticky;top:0;z-index:50;max-width:none;min-height:84px;padding:16px max(24px,calc((100% - 1240px)/2));background:var(--paper);border-bottom:1px solid var(--line)}
 .site-header nav a{min-height:44px;display:inline-flex;align-items:center}
-.site-header nav [aria-current=page]{text-decoration:underline;text-decoration-thickness:2px}
+.site-header .nav-download{border-bottom:0}
+.site-header nav [aria-current]{color:var(--cyan);text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:8px}
 .hero>*,.preview-layout>*,.feature-row>*,.guide-layout>*,.guide-split>*{min-width:0}
 .mobile-note{display:none}
 .page-intro{padding-block:64px 48px;border-bottom:1px solid var(--line)}
