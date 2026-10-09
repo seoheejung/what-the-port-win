@@ -1,1 +1,1 @@
-db59ffaa21718b03afa5ed72fa18041d73ce31b668689b80740b4bbfe07fb223  WhatThePort-Windows-x64.zip
+01f72bc2ada895ebbd987a528896a1125b601fc31e75ed0da35904871916cbcc  WhatThePort-Windows-x64.zip

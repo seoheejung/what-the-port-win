@@ -10,7 +10,7 @@
 
 ![What the Port for Windows — 로컬 개발 서버를 한눈에](docs/images/cover.jpg)
 
-*다운로드 페이지의 밝은 톤에 맞춘 소개용 생성 이미지. 아래 앱 화면은 최신 Windows 빌드의 실제 데모 캡처.*
+*소개용 생성 일러스트. 아래 앱 화면은 Windows 빌드의 실제 데모 캡처.*
 
 ## 실행 중인 서버 한눈에 확인
 
