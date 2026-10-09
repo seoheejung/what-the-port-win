@@ -62,6 +62,21 @@ try {
     for ($attempt = 0; $attempt -lt 30 -and $null -eq $window; $attempt++) { Start-Sleep -Milliseconds 100; $window = Visible-Window $primary.Id }
     if ($null -eq $window) { throw 'Hidden primary instance did not reopen.' }
     Write-Output 'PASS startup: relaunch reopens an explicitly hidden panel'
+
+    foreach ($mode in @('visible','background')) {
+        $stdout = Join-Path $fixtureRoot ('real-' + $mode + '.out')
+        $stderr = Join-Path $fixtureRoot ('real-' + $mode + '.err')
+        $preferences = Join-Path $fixtureRoot ('preferences-' + $mode)
+        $probe = Start-Process -FilePath (Join-Path $projectRoot 'dist\wtp-startup-tests.exe') -ArgumentList $mode, ('"' + $preferences + '"') -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+        $ownedProcesses.Add($probe)
+        # Retain the process handle so Windows PowerShell can read its exit code
+        # after a redirected child exits; then drain redirected output completely.
+        $probeHandle = $probe.Handle
+        if (-not $probe.WaitForExit(20000)) { throw ('Real startup timed out: ' + $mode) }
+        $probe.WaitForExit()
+        Get-Content -LiteralPath $stdout
+        if ($probe.ExitCode -ne 0) { Get-Content -LiteralPath $stderr; throw ('Real startup failed: ' + $mode) }
+    }
 } finally {
     foreach ($process in $ownedProcesses) { try { if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit(5000) | Out-Null } } finally { $process.Dispose() } }
     if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force }

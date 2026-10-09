@@ -62,7 +62,13 @@
     <ControlTemplate.Triggers><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="SelectFocus" Property="BorderBrush" Value="#7DDBE0"/></Trigger></ControlTemplate.Triggers>
    </ControlTemplate></Setter.Value></Setter>
   </Style>
-  <Style TargetType="ToolTip"><Setter Property="Background" Value="#30343E"/><Setter Property="Foreground" Value="#F5F5F7"/><Setter Property="BorderBrush" Value="#505564"/><Setter Property="MaxWidth" Value="380"/></Style>
+  <Style TargetType="ToolTip">
+   <Setter Property="Background" Value="#292E38"/><Setter Property="Foreground" Value="#F5F5F7"/><Setter Property="BorderBrush" Value="#59606F"/>
+   <Setter Property="MaxWidth" Value="340"/><Setter Property="Padding" Value="12,10"/><Setter Property="FontSize" Value="12"/>
+   <Setter Property="FontFamily" Value="{DynamicResource ToolTipFont}"/><Setter Property="HorizontalContentAlignment" Value="Left"/>
+   <Setter Property="ContentTemplate"><Setter.Value><DataTemplate><TextBlock Text="{Binding Converter={StaticResource ToolTipText}}" TextAlignment="Left" TextWrapping="Wrap" TextTrimming="None" LineHeight="18"/></DataTemplate></Setter.Value></Setter>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToolTip"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="{TemplateBinding Padding}"><ContentPresenter ContentSource="Content"/></Border></ControlTemplate></Setter.Value></Setter>
+  </Style>
   <Style TargetType="ScrollBar">
    <Setter Property="Width" Value="5"/><Setter Property="MinWidth" Value="0"/><Setter Property="MaxWidth" Value="5"/><Setter Property="Background" Value="Transparent"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar">
@@ -93,7 +99,7 @@
    <StackPanel KeyboardNavigation.TabIndex="2" DockPanel.Dock="Bottom">
     <Border x:Name="MessageBox" Background="#36312B" Padding="12,9" Margin="12,4" CornerRadius="7" Visibility="Collapsed"><TextBlock x:Name="Message" AutomationProperties.LiveSetting="Polite" Foreground="#FFCF83" FontSize="11" TextWrapping="Wrap"/></Border>
     <Border BorderBrush="#30343D" BorderThickness="0,1,0,0"><StackPanel x:Name="Footer" Margin="12,11,12,8"/></Border>
-    <TextBlock x:Name="Status" Margin="20,0,20,10" Foreground="#979DAA" FontSize="10" Text="LOCAL ONLY   ·   CTRL + ALT + P"/>
+    <TextBlock x:Name="Status" Margin="20,0,20,10" Foreground="#979DAA" FontSize="10"/>
    </StackPanel>
    <ScrollViewer x:Name="Scroll" KeyboardNavigation.TabIndex="1" Style="{StaticResource {x:Type ScrollViewer}}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False"><StackPanel x:Name="Body" Margin="16,0,16,12"/></ScrollViewer>
   </DockPanel>

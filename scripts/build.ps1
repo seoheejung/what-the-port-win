@@ -43,5 +43,8 @@ if ($Tests) {
     & $compiler /nologo /target:exe /platform:x64 /optimize+ /warnaserror+ "/out:$outputRoot\wtp-ui-tests.exe" "/r:$outputRoot\WhatThePort.Core.dll" "/r:$outputRoot\WhatThePort.exe" "/r:$framework\WPF\PresentationFramework.dll" "/r:$framework\WPF\PresentationCore.dll" "/r:$framework\WPF\WindowsBase.dll" /r:System.Xaml.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll (Join-Path $projectRoot 'tests\UiTests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'UI test compilation failed.' }
     Copy-Item -LiteralPath (Join-Path $projectRoot 'src\App.config') -Destination (Join-Path $outputRoot 'wtp-ui-tests.exe.config') -Force
+    & $compiler /nologo /target:exe /platform:x64 /optimize+ /warnaserror+ "/out:$outputRoot\wtp-startup-tests.exe" "/r:$outputRoot\WhatThePort.Core.dll" "/r:$outputRoot\WhatThePort.exe" "/r:$framework\WPF\PresentationFramework.dll" "/r:$framework\WPF\PresentationCore.dll" "/r:$framework\WPF\WindowsBase.dll" /r:System.Xaml.dll (Join-Path $projectRoot 'tests\StartupTests.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'Startup test compilation failed.' }
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'src\App.config') -Destination (Join-Path $outputRoot 'wtp-startup-tests.exe.config') -Force
 }
 Write-Output "Built: $outputRoot"

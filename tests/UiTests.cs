@@ -12,6 +12,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using WhatThePort.App;
 
 public static class UiTests {
@@ -30,6 +31,7 @@ public static class UiTests {
             // Exercise actual WPF templates invisibly; every operation uses isolated demo data.
             Layout();Check("list starts with five servers",Rows().Count()==5);
             HeaderTests();
+            ToolTipTests();
             KeyboardTests();
             CheckNames("list controls have screen reader names");
             Click(Rows().First());Check("row opens server detail",Title()=="menubar port monitor");
@@ -96,6 +98,9 @@ public static class UiTests {
             Check("unrelated tray icon callbacks are ignored",panel.Window==null);
             SendMessage(owner,0x8002,IntPtr.Zero,new IntPtr((1<<16)|0x400));window=panel.Window;window.Opacity=0;Layout();
             Check("native tray click opens the deferred panel",panel.IsVisible&&Title()=="What the Port");
+            Check("footer explains the shortcut and refresh interval",((TextBlock)window.FindName("Status")).Text.Contains("Ctrl+Alt+P show/hide")&&((TextBlock)window.FindName("Status")).Text.Contains("every 3s"));
+            SendMessage(owner,0x0312,new IntPtr(1),IntPtr.Zero);Pump();Check("hotkey hides the visible panel while tray stays active",!panel.IsVisible&&tray.Visible);
+            SendMessage(owner,0x0312,new IntPtr(1),IntPtr.Zero);Layout();
             Click((Button)window.FindName("Pin"));
             typeof(WhatThePort.App.Panel).GetField("current",PrivateInstance).SetValue(panel,Demo.Create());Rerender();
             Click(Rows().First());var chart=All(Body()).OfType<Chart>().First();chart.Focus();Press(Key.Home);var selectedTime=chart.SelectedTime;
@@ -126,8 +131,72 @@ public static class UiTests {
             Check("native tray context menu opens and dismisses without creating panel",tray.Visible&&panel.Window==null);
             panel.ShowFromLaunch();window=panel.Window;window.Opacity=0;Layout();
             Check("explicit activation still works after release",panel.IsVisible);
+            LanguagePreviewTests(storage);
             tray.Dispose();tray.Dispose();Check("tray disposal is idempotent",!tray.Visible);
         }finally{if(Directory.Exists(storage))Directory.Delete(storage,true);}
+    }
+    static ComboBox LanguageChoice(){return All(Body()).OfType<ComboBox>().Single(c=>(string)c.Tag=="select-LANGUAGE / 언어");}
+    static void ChooseLanguage(string choice){var language=LanguageChoice();language.Focus();language.IsDropDownOpen=true;language.SelectedItem=choice;Layout();Pump();}
+    static void LanguagePreviewTests(string storage){
+        Click(ByName("Settings (Ctrl+,)"));ChooseLanguage("한국어");Click(ByName("설정 저장"));
+        string preferences=Path.Combine(storage,"settings.json"),saved=File.ReadAllText(preferences);
+        Click(ByName("설정 (Ctrl+,)"));
+        All(Body()).OfType<TextBox>().First().Text="unfinished";
+        All(Body()).OfType<CheckBox>().First().IsChecked=true;
+        All(Body()).OfType<ComboBox>().Single(c=>(string)c.Tag=="select-AUTOMATIC CLEAN UP").SelectedIndex=1;
+        Click(ByName("설정 저장"));
+        ChooseLanguage("English");
+        Check("language preview immediately translates labels, header and actions",Title()=="Settings"&&String.Equals(window.Language.IetfLanguageTag,"en-US",StringComparison.OrdinalIgnoreCase)&&ByName("Discard changes")!=null&&ByName("Save preferences")!=null&&All(Body()).OfType<TextBlock>().Any(t=>t.Text=="A quieter laptop, on your terms."));
+        Check("language preview also translates the existing validation notice",Message()=="Enter valid numbers for the sampling and alert thresholds.");
+        Check("language preview preserves incomplete input and other unsaved preferences",All(Body()).OfType<TextBox>().First().Text=="unfinished"&&All(Body()).OfType<CheckBox>().First().IsChecked==true&&All(Body()).OfType<ComboBox>().Single(c=>(string)c.Tag=="select-AUTOMATIC CLEAN UP").SelectedItem.ToString()=="Ask");
+        Check("preview never saves or changes active monitoring settings",File.ReadAllText(preferences)==saved&&((WhatThePort.Settings)Field("settings")).Language=="ko"&&((WhatThePort.Settings)Field("settings")).Cleanup=="Off");
+        CaptureVisual((FrameworkElement)window.Content,"settings-language-preview-en");
+        ChooseLanguage("한국어");ChooseLanguage("English");
+        Check("repeated language previews preserve draft values",All(Body()).OfType<TextBox>().First().Text=="unfinished");
+        window.Hide();Invoke("SuspendWindow");panel.ShowFromLaunch();Layout();
+        Check("hiding settings preserves the preview and draft",Title()=="Settings"&&All(Body()).OfType<TextBox>().First().Text=="unfinished");
+        Click(ByName("Discard changes"));Check("Cancel restores Korean without saving preview",ByName("설정 (Ctrl+,)")!=null&&String.Equals(window.Language.IetfLanguageTag,"ko-KR",StringComparison.OrdinalIgnoreCase)&&File.ReadAllText(preferences)==saved);
+        CaptureVisual((FrameworkElement)window.Content,"footer-shortcut-ko");
+        Click(ByName("설정 (Ctrl+,)"));
+        Check("cancelled draft is discarded on reopening settings",LanguageChoice().SelectedItem.ToString()=="한국어"&&All(Body()).OfType<TextBox>().First().Text=="3"&&All(Body()).OfType<CheckBox>().First().IsChecked==false);
+        ChooseLanguage("English");Click((Button)window.FindName("Back"));Check("Back also cancels language preview",ByName("설정 (Ctrl+,)")!=null);
+        Click(ByName("설정 (Ctrl+,)"));ChooseLanguage("English");Press(Key.Escape);Check("Escape also cancels language preview",ByName("설정 (Ctrl+,)")!=null);
+        Click(ByName("설정 (Ctrl+,)"));ChooseLanguage("English");Click(ByName("Save preferences"));
+        Check("Save persists the previewed language",new WhatThePort.Store(storage).LoadSettings().Language=="en"&&ByName("Settings (Ctrl+,)")!=null);
+    }
+    static IEnumerable<DependencyObject> Visuals(DependencyObject root){yield return root;for(int i=0;i<VisualTreeHelper.GetChildrenCount(root);i++)foreach(var child in Visuals(VisualTreeHelper.GetChild(root,i)))yield return child;}
+    static void ToolTipTests(){
+        var strings=new Strings("ko");string reason="Terminal, agent, system, database or container process. Stop it in its own app.";
+        string heading=(string)((TextBlock)window.FindName("Title")).ToolTip;
+        Check("tooltip sentence breaks preserve paths, URLs and decimal points",ToolTipTextConverter.Sentences("Drag to move. Position is saved.")=="Drag to move.\nPosition is saved."&&ToolTipTextConverter.Sentences("위치 변경·저장. 방향키로도 이동 가능.")=="위치 변경·저장.\n방향키로도 이동 가능."&&ToolTipTextConverter.Sentences(@"C:\project. folder\app.js")==@"C:\project. folder\app.js"&&ToolTipTextConverter.Sentences(@"\\server\project. folder\app.js")==@"\\server\project. folder\app.js"&&ToolTipTextConverter.Sentences("https://my-preview.vercel.app")=="https://my-preview.vercel.app"&&ToolTipTextConverter.Sentences("Memory 1.5 GB. CPU 0.1%.")=="Memory 1.5 GB.\nCPU 0.1%.");
+        foreach(string text in new[]{strings.T(reason),reason,@"C:\projects\"+new string('x',150)+@"\development-server",heading,strings.T(heading)}){
+            // WPF creates string tooltips outside the window tree; do not assign a style in the test.
+            var tip=new ToolTip{Content=text,PlacementTarget=window};TextBlock.SetTextAlignment(tip,TextAlignment.Center);
+            try{
+                tip.IsOpen=true;Pump();tip.UpdateLayout();
+                var block=Visuals(tip).OfType<TextBlock>().First();
+                Check("long tooltip renders complete left-aligned text on multiple lines within the panel width",block.Text.Replace("\n"," ")==text&&block.TextAlignment==TextAlignment.Left&&block.ActualHeight>18&&block.ActualWidth<=314.5&&tip.ActualWidth<=340.5);
+                if(text==strings.T(reason))CaptureVisual(tip,"tooltip-protection-ko");
+                if(text==heading)CaptureVisual(tip,"tooltip-title-sentences");
+                if(text==strings.T(heading))CaptureVisual(tip,"tooltip-title-sentences-ko");
+            }finally{tip.IsOpen=false;Pump();}
+        }
+        // Open the automatic string tooltip through WPF, then detach its owner as a refresh does.
+        var owner=new TextBlock{Text="Temporary tooltip owner",ToolTip=strings.T(reason)};Body().Children.Add(owner);Layout();
+        var serviceType=typeof(ToolTip).Assembly.GetType("System.Windows.Controls.PopupControlService");
+        var service=serviceType.GetProperty("Current",BindingFlags.Static|BindingFlags.NonPublic).GetValue(null,null);
+        try{
+            serviceType.GetMethod("ShowToolTip",PrivateInstance).Invoke(service,new object[]{owner,false});Pump();
+            var tip=(ToolTip)serviceType.GetProperty("CurrentToolTip",PrivateInstance).GetValue(service,null);
+            Body().Children.Remove(owner);Layout();Pump();tip.UpdateLayout();
+            Check("automatic tooltip retains dark wrapping style when refresh removes its owner",tip.MaxWidth==340&&Visuals(tip).OfType<TextBlock>().Any(t=>t.TextWrapping==TextWrapping.Wrap));
+            CaptureVisual(tip,"tooltip-after-refresh");
+        }finally{serviceType.GetMethod("DismissToolTips",PrivateInstance).Invoke(service,null);Body().Children.Remove(owner);Pump();}
+    }
+    static void CaptureVisual(FrameworkElement visual,string name){
+        visual.UpdateLayout();string folder=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"..","artifacts","screenshots");Directory.CreateDirectory(folder);
+        var bitmap=new RenderTargetBitmap((int)Math.Ceiling(visual.ActualWidth*1.5),(int)Math.Ceiling(visual.ActualHeight*1.5),144,144,PixelFormats.Pbgra32);bitmap.Render(visual);
+        var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));using(var file=File.Create(Path.Combine(folder,name+".png")))encoder.Save(file);
     }
     static void LaunchVisibilityTests(){
         // Use a normal demo panel: snapshot panels intentionally suppress auto-hide.
@@ -165,11 +234,13 @@ public static class UiTests {
         Check("protected checkbox explains why without enabling stop",!protectedBox.IsEnabled&&ToolTipService.GetShowOnDisabled(protectedBox)&&AutomationProperties.GetHelpText(protectedBox).Contains("parent process"));
         Press(Key.Escape);Click(ByName("Settings (Ctrl+,)"));
         All(Body()).OfType<ComboBox>().Single(c=>(string)c.Tag=="select-LANGUAGE / 언어").SelectedItem="한국어";
-        Click(ByName("Save preferences"));
+        Click(ByName("설정 저장"));
         Check("language save immediately translates header and feedback",Title()=="What the Port"&&Message().Contains("설정"));
         Check("project names are never translated",All(Body()).OfType<TextBlock>().Any(t=>t.Text=="Settings"));
         Check("Korean accessibility names include header and settings",AutomationProperties.GetName((Button)window.FindName("Back"))=="서버 목록"&&ByName("설정 (Ctrl+,)")!=null);
         Click(Rows().First());var chart=All(Body()).OfType<Chart>().First();
+        Check("protected detail exposes a persistent explanation card",All(Body()).OfType<Border>().Any(b=>(string)b.Tag=="protection-reason")&&All(Body()).OfType<TextBlock>().Any(t=>t.Text.Contains("작업 세션")&&t.TextWrapping==TextWrapping.Wrap&&t.TextTrimming==TextTrimming.None));
+        CaptureVisual((FrameworkElement)window.Content,"protected-detail-ko");
         Check("Korean chart exposes samples and keyboard instructions",UIElementAutomationPeer.CreatePeerForElement(chart).GetName().Contains("측정값")&&UIElementAutomationPeer.CreatePeerForElement(chart).GetHelpText().Contains("방향키"));
         Click(ByName("프로젝트 연결 관리 및 로컬 URL 복사"));Check("Korean project link labels",Title()=="프로젝트 연결"&&All(Body()).OfType<TextBox>().Any(t=>AutomationProperties.GetName(t)=="세션 ID"));
         Press(Key.Escape);Click(ByName("종료할 서버 선택 (C)"));Check("Korean protected cleanup explanation is visible",All(Body()).OfType<TextBlock>().Any(t=>t.Text.Contains("보호된 항목")));
@@ -177,7 +248,7 @@ public static class UiTests {
         var sample=All(Body()).OfType<TextBox>().First();sample.Text="bad";Click(ByName("설정 저장"));Check("invalid numeric input has Korean feedback",Message().Contains("올바른 숫자"));sample.Text="3";
         var modes=All(Body()).OfType<ComboBox>().Single(c=>(string)c.Tag=="select-AUTOMATIC CLEAN UP");Check("cleanup options are localized",modes.Items.Cast<string>().SequenceEqual(new[]{"끄기","알림 후 직접 선택","자동 종료"}));
         All(Body()).OfType<ComboBox>().Single(c=>(string)c.Tag=="select-LANGUAGE / 언어").SelectedItem="English";
-        Click(ByName("설정 저장"));Check("English can be restored without restart",Title()=="What the Port"&&ByName("Settings (Ctrl+,)")!=null);
+        Click(ByName("Save preferences"));Check("English can be restored without restart",Title()=="What the Port"&&ByName("Settings (Ctrl+,)")!=null);
         var strings=new Strings("ko");var outcome=new WhatThePort.StopResult{Port=3000,ListenerStopped=true,Stopped=1};outcome.Errors.Add("Access denied");
         Check("partial stop feedback cannot claim total failure or total success",strings.StopSummary(outcome).Contains("일부 종료")&&strings.StopSummary(outcome).Contains("서버 본체 종료")&&strings.StopSummary(outcome).Contains("오류 1건"));
         foreach(var s in snapshot.Servers)s.Protected=true;Rerender();Click(ByName("Select servers to stop (C)"));

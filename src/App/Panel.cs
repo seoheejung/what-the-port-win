@@ -30,6 +30,11 @@ namespace WhatThePort.App {
         readonly HashSet<string> selected=new HashSet<string>();
         readonly bool demo,snapshotMode;
         Settings settings;
+        sealed class SettingsDraft {
+            public string Language,Scan,Memory,Growth,Cpu,Idle,Cleanup,Terminal;
+            public bool Notifications,AllListeners;
+        }
+        SettingsDraft settingsDraft;
         Strings strings;
         string stopDetails;
         Snapshot current=new Snapshot();
@@ -68,11 +73,18 @@ namespace WhatThePort.App {
         public bool IsVisible {get{return Window!=null&&Window.IsVisible;}}
         void EnsureWindow(){
             if(Window!=null)return;
+            var resources=Application.Current.Resources;
+            if(!resources.Contains("ToolTipText"))resources["ToolTipText"]=new ToolTipTextConverter();
             Window=(Window)Application.LoadComponent(new Uri("/WhatThePort;component/Shell.xaml",UriKind.Relative));
             Application.Current.MainWindow=Window;
             body=Find<StackPanel>("Body"); footer=Find<StackPanel>("Footer"); title=Find<TextBlock>("Title"); status=Find<TextBlock>("Status"); message=Find<TextBlock>("Message"); messageBox=Find<Border>("MessageBox"); back=Find<Button>("Back"); pin=Find<Button>("Pin");
             var fonts=new Uri(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"fonts")+Path.DirectorySeparatorChar);
             Window.FontFamily=new FontFamily(fonts,"./#Geist"); mono=new FontFamily(fonts,"./#Geist Mono");
+            // Automatic tooltips outlive list items replaced by Refresh. Keep their
+            // resources at application scope so detached popups never fall back to the OS theme.
+            resources["ToolTipFont"]=Window.FontFamily;
+            resources[typeof(ToolTip)]=Window.Resources[typeof(ToolTip)];
+            Window.Resources.Remove(typeof(ToolTip));
             Find<Button>("Hide").Click+=delegate{Window.Hide();}; back.Click+=delegate{Navigate("list");};
             pin.Click+=delegate{pinned=!pinned; pin.Content=pinned?"◆":"◇"; pin.ToolTip=T(pinned?"Unpin panel":"Keep panel open");AutomationProperties.SetName(pin,(string)pin.ToolTip);};
             pin.Content=pinned?"◆":"◇";
@@ -106,7 +118,7 @@ namespace WhatThePort.App {
         TextBlock Text(string value,double size,string color,bool translate=true){return new TextBlock{Text=translate?T(value):value,FontSize=size,Foreground=B(color),VerticalAlignment=VerticalAlignment.Center,TextTrimming=TextTrimming.CharacterEllipsis};}
         TextBlock Mono(string value,double size,string color){var t=Text(value,size,color,false);t.FontFamily=mono;return t;}
         Button Button(string label,Action action,string tip){var b=new Button{Content=T(label),ToolTip=T(tip),Tag="action-"+(tip??label)};AutomationProperties.SetName(b,T(tip??label));b.Click+=delegate{Try(action);};return b;}
-        void Try(Action action){try{action();}catch(FormatException){Notice(T("Enter valid numbers for the sampling and alert thresholds."));}catch(OverflowException){Notice(T("Enter valid numbers for the sampling and alert thresholds."));}catch(Exception e){Notice(e.Message);}}
+        void Try(Action action){try{action();}catch(FormatException){Notice("Enter valid numbers for the sampling and alert thresholds.");}catch(OverflowException){Notice("Enter valid numbers for the sampling and alert thresholds.");}catch(Exception e){Notice(e.Message);}}
         void Notice(string value){
             pendingNotice=value;if(Window==null)return;
             message.Text=strings.Error(value);messageBox.Visibility=String.IsNullOrEmpty(value)?Visibility.Collapsed:Visibility.Visible;
@@ -146,7 +158,14 @@ namespace WhatThePort.App {
             var bounds=PanelPlacement.PhysicalBounds(Window);settings.PanelLeft=(int)Math.Round(bounds.Left);settings.PanelBottom=(int)Math.Round(bounds.Bottom);
             if(!demo)Try(delegate{store.SaveSettings(settings);});
         }
-        public async void Start(){timer.Start();await Refresh();}
+        public void Start(){
+            // Program calls Start before Application.Run. Begin the first await
+            // inside the dispatcher so its continuation returns to the UI thread.
+            timer.Dispatcher.BeginInvoke(new Action(async delegate{
+                if(closing||timer.IsEnabled)return;
+                timer.Start();await Refresh();
+            }));
+        }
         public async Task Refresh(){
             if(demo||scanning||acting)return;scanning=true;
             try {
@@ -161,7 +180,13 @@ namespace WhatThePort.App {
             }catch(Exception e){current.Error=e.Message;Notice("Scan unavailable. "+e.Message);if(status!=null)status.Text=T("SCAN PAUSED · retrying automatically");}
             finally{scanning=false;}
         }
-        void Navigate(string target){EnsureWindow();view=target;suspendedView=null;Notice(null);Find<ScrollViewer>("Scroll").ScrollToTop();Render();if(IsVisible){
+        void Navigate(string target){
+            EnsureWindow();
+            if(view=="settings"&&target=="settings"&&settingsDraft!=null)return;
+            if(view=="settings"&&target!="settings"){
+                settingsDraft=null;strings.Language=settings.Language;UpdateTrayMenu();
+            }
+            view=target;suspendedView=null;Notice(null);Find<ScrollViewer>("Scroll").ScrollToTop();Render();if(IsVisible){
             if(view=="list"){var row=body.Children.OfType<Button>().FirstOrDefault(b=>(b.Tag as string)=="server-"+detailKey);if(row!=null){row.Focus();return;}}
             if(view=="settings"||view=="links"){var input=Descendants(body).OfType<TextBox>().FirstOrDefault();if(input!=null){input.Focus();return;}}
             back.Focus();
@@ -179,8 +204,9 @@ namespace WhatThePort.App {
             back.Content=view=="list"?(object)DotGrid():"‹";back.IsEnabled=true;back.FontSize=25;back.Foreground=B("#A4A6AF");
             AutomationProperties.SetName(back,T(view=="list"?"Servers home":"Back to servers"));back.ToolTip=T(view=="list"?"Servers home":"Back to servers (Esc)");
             pin.ToolTip=T(pinned?"Unpin panel":"Keep panel open");AutomationProperties.SetName(pin,(string)pin.ToolTip);Find<Button>("Hide").ToolTip=T("Hide to tray (Esc)");AutomationProperties.SetName(Find<Button>("Hide"),T("Hide to tray"));
-            title.ToolTip=T("Drag to move. Position is saved. Ctrl+Shift+arrow keys also move the panel.");Window.Language=XmlLanguage.GetLanguage(settings.Language=="ko"?"ko-KR":"en-US");
-            status.Text=demo?T("DEMO · SAMPLE DATA · NO SYSTEM ACTIONS"):F("LOCAL ONLY   ·   CTRL + ALT + P   ·   {0}s",settings.ScanSeconds);
+            title.ToolTip=T("Drag to move. Position is saved. Ctrl+Shift+arrow keys also move the panel.");Window.Language=XmlLanguage.GetLanguage(strings.Language=="ko"?"ko-KR":"en-US");
+            status.Text=demo?T("DEMO · SAMPLE DATA · NO SYSTEM ACTIONS"):F("LOCAL ONLY   ·   Ctrl+Alt+P show/hide   ·   every {0}s",settings.ScanSeconds);
+            status.ToolTip=demo?null:T("Ctrl+Alt+P shows or hides this panel. Monitoring continues while hidden.");
             if(view=="detail")Detail();else if(view=="cleanup")List(true);else if(view=="settings")SettingsView();else if(view=="links")LinksView();else List(false);
             if(capturing||!Window.IsVisible)Window.Height=preferredHeight;else Place(false);
             Window.Title=view=="list"?"What the Port":title.Text+" · What the Port";
@@ -255,7 +281,12 @@ namespace WhatThePort.App {
             title.Text=s.Name;preferredHeight=704;
             var top=Columns(-1,124,34);top.Margin=new Thickness(3,1,3,7);Cell(top,Mono(":"+s.Port,29,Format.PortColor(s.Port)),0);Cell(top,Text(F("Running for {0}",strings.Duration(DateTime.UtcNow-s.Started)),11,"#A4A6AF"),1);
             var stop=Button("■",delegate{ConfirmStop(s);},s.Protected?"Protected server":"Stop server");stop.Background=B("#3B2528");stop.Foreground=B("#FF6961");stop.Padding=new Thickness(0);stop.IsEnabled=!s.Protected&&!acting&&current.Error==null;Cell(top,stop,2);body.Children.Add(top);Rule();
-            if(s.Protected){ToolTipService.SetShowOnDisabled(stop,true);stop.ToolTip=Protection(s);AutomationProperties.SetHelpText(stop,Protection(s));var reason=Text(Protection(s),11,"#FFCF83");reason.TextWrapping=TextWrapping.Wrap;reason.Margin=new Thickness(3,0,3,12);body.Children.Add(reason);}
+            if(s.Protected){
+                ToolTipService.SetShowOnDisabled(stop,true);stop.ToolTip=Protection(s);AutomationProperties.SetHelpText(stop,Protection(s));
+                var explanation=new StackPanel();var heading=Text("Protected process",12,"#FFCF83");heading.FontWeight=FontWeights.Medium;explanation.Children.Add(heading);
+                explanation.Children.Add(new TextBlock{Text=ToolTipTextConverter.Sentences(Protection(s)),FontSize=12,Foreground=B("#DADCE4"),TextWrapping=TextWrapping.Wrap,LineHeight=18,Margin=new Thickness(0,6,0,0)});
+                body.Children.Add(new Border{Tag="protection-reason",Background=B("#2C2C2D"),BorderBrush=B("#5C5140"),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(7),Padding=new Thickness(12,10,12,10),Margin=new Thickness(3,0,3,12),Child=explanation});
+            }
             var link=demo?null:store.LinkFor(s);
             Property("Session",link!=null&&!String.IsNullOrEmpty(link.Session)?link.Agent+" · "+link.Session:s.Agent??T("Not linked"),delegate{Navigate("links");});
             Property("Branch",s.Branch??T("No Git branch"),null);
@@ -325,19 +356,21 @@ namespace WhatThePort.App {
         ComboBox Select(string label,string value,params string[] choices){Caption(label);var combo=new ComboBox{Tag="select-"+label,ItemsSource=choices,SelectedItem=value,Margin=new Thickness(3,0,3,0)};AutomationProperties.SetName(combo,T(label));body.Children.Add(combo);return combo;}
         CheckBox Check(string label,bool value){var check=new CheckBox{Tag="check-"+label,Content=T(label),IsChecked=value,Margin=new Thickness(3,15,0,0)};AutomationProperties.SetName(check,T(label));body.Children.Add(check);return check;}
         void SettingsView(){
+            if(settingsDraft==null)settingsDraft=new SettingsDraft{Language=settings.Language,Scan=settings.ScanSeconds.ToString(),Memory=settings.MemoryGB.ToString(CultureInfo.InvariantCulture),Growth=settings.GrowthMB.ToString(),Cpu=settings.CpuPercent.ToString(),Idle=settings.IdleHours.ToString(CultureInfo.InvariantCulture),Notifications=settings.Notifications,Cleanup=settings.Cleanup,Terminal=settings.Terminal,AllListeners=settings.AllListeners};
+            var draft=settingsDraft;
             title.Text=T("Settings");preferredHeight=716;
             var intro=Text("A quieter laptop, on your terms.",16,"#F5F5F7");intro.Margin=new Thickness(3,8,0,3);body.Children.Add(intro);
-            var language=Select("LANGUAGE / 언어",settings.Language=="ko"?"한국어":"English","한국어","English");
-            var scan=Input("SAMPLE INTERVAL · seconds (1–30)",settings.ScanSeconds.ToString());
-            var memory=Input("MEMORY ALERT · GB",settings.MemoryGB.ToString(CultureInfo.InvariantCulture));
-            var growth=Input("GROWTH ALERT · MB / 10 min (0 = off)",settings.GrowthMB.ToString());
-            var cpu=Input("CPU ALERT · % of this computer",settings.CpuPercent.ToString());
-            var notify=Check("Desktop notifications",settings.Notifications);
-            string[] modes={"Off","Ask","Automatic"};var cleanup=Select("AUTOMATIC CLEAN UP",T(settings.Cleanup),modes.Select(T).ToArray());
-            var idle=Input("IDLE THRESHOLD · hours (0.05–720)",settings.IdleHours.ToString(CultureInfo.InvariantCulture));
+            var language=Select("LANGUAGE / 언어",draft.Language=="ko"?"한국어":"English","한국어","English");
+            var scan=Input("SAMPLE INTERVAL · seconds (1–30)",draft.Scan);
+            var memory=Input("MEMORY ALERT · GB",draft.Memory);
+            var growth=Input("GROWTH ALERT · MB / 10 min (0 = off)",draft.Growth);
+            var cpu=Input("CPU ALERT · % of this computer",draft.Cpu);
+            var notify=Check("Desktop notifications",draft.Notifications);
+            string[] modes={"Off","Ask","Automatic"};var cleanup=Select("AUTOMATIC CLEAN UP",T(draft.Cleanup),modes.Select(T).ToArray());
+            var idle=Input("IDLE THRESHOLD · hours (0.05–720)",draft.Idle);
             var explanation=new TextBlock{Text=T("Only continuously observed idle servers are eligible. Protected and alerting servers are never stopped automatically."),FontSize=11,Foreground=B("#A4A6AF"),TextWrapping=TextWrapping.Wrap,Margin=new Thickness(3,9,3,0)};body.Children.Add(explanation);
-            var terminal=Select("PREFERRED TERMINAL",settings.Terminal,"PowerShell","Windows Terminal");
-            var all=Check("Show all user TCP listeners",settings.AllListeners);
+            var terminal=Select("PREFERRED TERMINAL",draft.Terminal,"PowerShell","Windows Terminal");
+            var all=Check("Show all user TCP listeners",draft.AllListeners);
             var snooze=Button("Snooze alerts for 1 hour",delegate{snoozeUntil=DateTime.UtcNow.AddHours(1);Notice("Alerts snoozed for one hour.");},"Pause resource notifications");snooze.Margin=new Thickness(3,18,3,4);body.Children.Add(snooze);
             var position=Button("Reset panel position",delegate{settings.PanelLeft=null;settings.PanelBottom=null;if(!demo)store.SaveSettings(settings);Place(true);Notice("Position reset to the primary monitor. Drag the title to save a new position.");},"Reset panel position to primary monitor");position.Margin=new Thickness(3,8,3,4);body.Children.Add(position);
             var positionHelp=new TextBlock{Text=T("Drag the title to move the panel. Position is saved automatically. Keyboard: Ctrl+Shift+arrow keys."),TextWrapping=TextWrapping.Wrap,FontSize=11,Foreground=B("#A4A6AF"),Margin=new Thickness(3,4,3,0)};body.Children.Add(positionHelp);
@@ -347,6 +380,13 @@ namespace WhatThePort.App {
                 var next=new Settings{Language=(string)language.SelectedItem=="English"?"en":"ko",ScanSeconds=Int32.Parse(scan.Text,CultureInfo.InvariantCulture),MemoryGB=Double.Parse(memory.Text,CultureInfo.InvariantCulture),GrowthMB=Int32.Parse(growth.Text,CultureInfo.InvariantCulture),CpuPercent=Int32.Parse(cpu.Text,CultureInfo.InvariantCulture),IdleHours=Double.Parse(idle.Text,CultureInfo.InvariantCulture),Notifications=notify.IsChecked==true,Cleanup=modes[cleanup.SelectedIndex],Terminal=(string)terminal.SelectedItem,AllListeners=all.IsChecked==true};
                 next.PanelLeft=settings.PanelLeft;next.PanelBottom=settings.PanelBottom;next.Validate();if(!demo)store.SaveSettings(next);settings=next;strings.Language=settings.Language;UpdateTrayMenu();timer.Interval=TimeSpan.FromSeconds(settings.ScanSeconds);Navigate("list");Notice(demo?"Demo preferences applied for this session.":"Preferences saved.");
             },"Save preferences");save.Background=B("#F5F5F7");save.Foreground=B("#111318");Cell(buttons,save,1);footer.Children.Add(buttons);
+            language.SelectionChanged+=delegate{
+                string chosen=(string)language.SelectedItem=="English"?"en":"ko";if(chosen==draft.Language)return;
+                // Keep raw text, including incomplete numeric input, outside the rebuilt controls.
+                draft.Language=chosen;draft.Scan=scan.Text;draft.Memory=memory.Text;draft.Growth=growth.Text;draft.Cpu=cpu.Text;draft.Idle=idle.Text;
+                draft.Notifications=notify.IsChecked==true;draft.AllListeners=all.IsChecked==true;draft.Cleanup=modes[cleanup.SelectedIndex];draft.Terminal=(string)terminal.SelectedItem;
+                language.IsDropDownOpen=false;strings.Language=chosen;Render();Notice(pendingNotice);UpdateTrayMenu();
+            };
         }
         void LinksView(){
             var s=CurrentServer();if(s==null){Navigate("list");return;}title.Text=T("Project links");preferredHeight=650;var link=demo?null:store.LinkFor(s);
